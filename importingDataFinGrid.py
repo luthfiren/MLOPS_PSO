@@ -5,7 +5,7 @@ from time import sleep
 # == configuration ==
 datasetId = 316
 apiKey = "0de19d67f7fa4e7bb177e5c163b3c802"
-pageSize = (24*60)
+pageSize = (24*2) # Adjust later for production
 maxRetries = 3
 
 # == Folder and File Setup ==
