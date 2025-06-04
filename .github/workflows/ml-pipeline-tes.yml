@@ -1,0 +1,31 @@
+name: ML Pipeline
+
+on:
+  workflow_dispatch:  # Bisa dijalankan manual dari UI GitHub
+  push:
+    branches: [ ci-ml-pipeline ]  # Ganti dengan nama branch kamu, misal: ci-ml-pipeline
+
+jobs:
+  ml-lifecycle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+           python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirement.txt
+          pip install jupyter
+      - name: Data Ingestion Fingrid & FMI
+        run: |
+          python importingDataFinGrid.py
+          python importingDataFMI.py
+      - name: Data Preprocessing
+        run: |
+          jupyter nbconvert --to notebook --execute preprocessing.ipynb
