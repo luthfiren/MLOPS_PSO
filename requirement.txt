@@ -1,4 +1,4 @@
-﻿asttokens==3.0.0
+asttokens==3.0.0
 attrs==25.3.0
 certifi==2025.4.26
 cffi==1.17.1
@@ -17,13 +17,18 @@ fmi-weather-client==0.6.0
 fmiopendata==0.4.3
 fonttools==4.58.1
 geopandas==1.1.0
+great_expectations==0.17.21
 idna==3.10
 ipykernel==6.29.5
 ipython>=8.0.0,<9.0.0
 ipython_pygments_lexers==1.1.1
 jedi==0.19.2
+jupyter==1.0.0
 jupyter_client==8.6.3
 jupyter_core==5.8.1
+nbclient==0.10.0
+nbconvert==7.16.3
+nbformat==5.10.4
 kiwisolver==1.4.8
 matplotlib==3.10.3
 matplotlib-inline==0.1.7
@@ -57,4 +62,3 @@ tzdata==2025.2
 urllib3==2.4.0
 wcwidth==0.2.13
 xmltodict==0.14.2
-
