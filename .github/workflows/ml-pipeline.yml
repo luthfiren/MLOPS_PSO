@@ -18,9 +18,6 @@ jobs:
         with:
            python-version: '3.11'
            
-      - name: Check GE version
-        run: python -c "import great_expectations; print(great_expectations.__version__)"
-
       - name: Install dependencies
         run: |
           pip install -r requirement.txt
