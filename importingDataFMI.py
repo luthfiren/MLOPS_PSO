@@ -271,7 +271,7 @@ if __name__ == "__main__":
     # ── Config ─────────────────────────────────────────────
     bbox_coordinates = "19.0,59.5,31.5,70.1"
     hours_to_fetch = 168
-    total_hours_to_crawl = 25920  # 3 years
+    total_hours_to_crawl = (24*60)  # 3 years
     output_dir = "fileExtracted"
     os.makedirs(output_dir, exist_ok=True)
     csv_filename = os.path.join(output_dir, "finland_country_level_weather.csv")

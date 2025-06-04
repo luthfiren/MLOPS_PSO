@@ -5,7 +5,7 @@ from time import sleep
 # == configuration ==
 datasetId = 316
 apiKey = "0de19d67f7fa4e7bb177e5c163b3c802"
-pageSize = 5
+pageSize = (24*60)
 maxRetries = 3
 
 # == Folder and File Setup ==
@@ -25,7 +25,7 @@ def load_last_success_time():
             return datetime.fromisoformat(json.load(f)["last_ingestion_time"])
     else:
         # Default: yesterday 00:00 UTC
-        return (datetime.now(timezone.utc) - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return (datetime.now(timezone.utc) - timedelta(days=pageSize/24)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 def save_current_time_as_last_success(rfc3339_str):
     with open(stateFile, "w") as f:
