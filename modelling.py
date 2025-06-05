@@ -536,19 +536,17 @@ def create_datasets(train_long, val_long, test_long,
     )
 
     val_dataset = TimeSeriesDataSet.from_dataset(train_dataset, val_long, predict=False, stop_randomization=True)
-    test_dataset_eval = TimeSeriesDataSet.from_dataset(train_dataset, test_long, predict=False, stop_randomization=True)
     test_dataset_pred = TimeSeriesDataSet.from_dataset(train_dataset, test_long, predict=True, stop_randomization=True)
 
-    return train_dataset, val_dataset, test_dataset_eval, test_dataset_pred
+    return train_dataset, val_dataset, test_dataset_pred
 
 
-def create_dataloaders(train_dataset, val_dataset, test_dataset_eval, test_dataset_pred, batch_size=64):
+def create_dataloaders(train_dataset, val_dataset, test_dataset_pred, batch_size=64):
     train_dataloader = train_dataset.to_dataloader(train=True, batch_size=batch_size, num_workers=0)
     val_dataloader = val_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
-    test_dataloader_eval = test_dataset_eval.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
     test_dataloader_pred = test_dataset_pred.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
 
-    return train_dataloader, val_dataloader, test_dataloader_eval, test_dataloader_pred
+    return train_dataloader, val_dataloader, test_dataloader_pred
 
 
 def build_model(train_dataset, dataTrain_loaders, dataVal_loaders):
@@ -629,23 +627,25 @@ if __name__ == "__main__":
     test_df = pd.read_csv(test_path, sep=',')
     val_df = pd.read_csv(val_path, sep=',')
     
-    train_df = add_time_idx(train_df)
-    val_df = add_time_idx(val_df)
-    test_df = add_time_idx(test_df)
     
-    train_df = add_group_column(train_df)
-    val_df = add_group_column(val_df)
-    test_df = add_group_column(test_df)
+    # ======= TFT =========
+    train_df_tft = add_time_idx(train_df.copy())
+    val_df_tft = add_time_idx(val_df.copy())
+    test_df_tft = add_time_idx(test_df.copy())
+    
+    train_df_tft = add_group_column(train_df_tft)
+    val_df_tft = add_group_column(val_df_tft)
+    test_df_tft = add_group_column(test_df_tft)
 
-    train_ds, val_ds, test_ds_eval, test_ds_pred = create_datasets(train_df, val_df, test_df)
-    train_dl, val_dl, test_dl_eval, test_dl_pred = create_dataloaders(train_ds, val_ds, test_ds_eval, test_ds_pred)
+    train_ds, val_ds, test_ds_pred = create_datasets(train_df_tft, val_df_tft, test_df_tft)
+    train_dl, val_dl, test_dl_pred = create_dataloaders(train_ds, val_ds, test_ds_pred)
 
     # Train
     model, trainer = build_model(train_ds, train_dl, val_dl)
     train_model(trainer, model, train_dl, val_dl)
 
     # Evaluate on val set (which has targets)
-    evaluate_model(model, val_dl)
+    val_mae, val_rmse = evaluate_model(model, val_dl)
 
     # Predict on the real test set (no targets)
     predictions = model.predict(test_dl_pred)
