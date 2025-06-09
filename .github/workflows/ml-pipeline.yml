@@ -1,0 +1,42 @@
+name: ML Pipeline
+
+on:
+  workflow_dispatch:  # Bisa dijalankan manual dari UI GitHub
+  push:
+    branches: [ master ]  # Ganti dengan nama branch kamu, misal: ci-ml-pipeline
+
+jobs:
+  ml-lifecycle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+           python-version: '3.11'
+           
+      - name: Install dependencies
+        run: |
+          pip install -r requirement.txt
+          pip install jupyter
+
+      - name: Data Ingestion Fingrid & FMI
+        run: |
+          python importingDataFinGrid.py
+          python importingDataFMI.py
+
+      - name: Data Preprocessing
+        run: |
+          jupyter nbconvert --to notebook --execute preprocessing.ipynb
+          
+      - name: Train and Evaluate ML Model
+        run: |
+          python modelling.py # This assumes modelling.py will execute your training and evaluation logic
+          # If your modelling.py requires specific arguments or functions to be called,
+          # you might need to adjust this line. For example:
+          # python -c "from modelling import train_sarima_model; train_sarima_model()"
+          # Or if it has a main function:
+          # python -c "from modelling import main; main()"
