@@ -1,1 +1,3 @@
 2025-06-09 15:38:14,263 - ThetaModel - ThetaModel Average MAE across 5 folds = 0.8186
+2025-06-09 15:52:40,554 - ThetaModel - ThetaModel Average MAE across 5 folds = 0.8186
+2025-06-09 15:55:08,740 - ThetaModel - ThetaModel Average MAE across 5 folds = 0.8186, Training Time = 0.12 seconds

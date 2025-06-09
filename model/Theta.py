@@ -5,6 +5,7 @@ import pandas as pd
 import joblib
 import json
 import math
+import time
 import multiprocessing
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import ParameterGrid
@@ -36,6 +37,7 @@ class ThetaModel:
         return logger
 
     def train_with_fold(self, folds):
+        start_time = time.time()
         scores = []
 
         for i, (train_df, test_df) in enumerate(folds):
@@ -57,7 +59,10 @@ class ThetaModel:
             scores.append(score)
             
         avg_score = sum(scores) / len(scores)
-        self.logger.info(f"{self.model_name} Average MAE across {len(folds)} folds = {avg_score:.4f}")
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        
+        self.logger.info(f"{self.model_name} Average MAE across {len(folds)} folds = {avg_score:.4f}, Training Time = {elapsed_time:.2f} seconds")
         return avg_score
 
     def predict(self, h=None):

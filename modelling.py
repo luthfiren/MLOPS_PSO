@@ -490,12 +490,10 @@ if __name__ == "__main__":
         train_split = univariate_train_df.iloc[train_idx]
         test_split = univariate_train_df.iloc[test_idx]
         splits.append((train_split, test_split))
-        
-    print(splits)
-    
+            
     theta_model = ThetaModel()
-    mae = theta_model.train_with_fold(folds=splits)
-    print(mae)
+    theta_mae = theta_model.train_with_fold(folds=splits)
+    print(theta_mae)
     
     # Check sesonality and trend
     # trend_status = has_trend(time_series=train_df['value'])
