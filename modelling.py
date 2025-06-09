@@ -333,6 +333,8 @@ class ExponentialSmoothingSelector:
     def get_all_evaluations(self):
         return self.evaluations
 
+# # Model Theta
+
 
 # # MODEL TFT
 def add_time_idx(df, time_col="endTime"):
@@ -440,6 +442,22 @@ def evaluate_model(model, test_dataloader):
     print(f"Test MAE: {mae:.4f}, RMSE: {rmse:.4f}")
     return mae, rmse
 
+from model import ThetaModel
+from sklearn.model_selection import TimeSeriesSplit
+import time
+
+def univariate_configuration(train, val, id_value='series_1'):
+    univariate_col = ['endTime', 'value']
+    rename_map = {'endTime': 'ds', 'value': 'y'}
+    
+    def prepare_df(df):
+        return df.loc[:, univariate_col].rename(columns=rename_map).assign(unique_id=id_value)
+    
+    df_train = prepare_df(train)
+    df_validation = prepare_df(val)
+    
+    return df_train, df_validation
+
 # 🧪 Example Usage
 if __name__ == "__main__":
     # Define base path
@@ -447,17 +465,45 @@ if __name__ == "__main__":
 
     # File paths
     train_path = os.path.join(base_dir, 'train.csv')
-    test_path = os.path.join(base_dir, 'test.csv')
     val_path = os.path.join(base_dir, 'val.csv')
+    test_path = os.path.join(base_dir, 'test.csv') # hapus kalau sudah integrasi
+    prediction_path = os.path.join(base_dir, 'test.csv')
 
     # Read CSV files
     train_df = pd.read_csv(train_path, sep=',')
-    test_df = pd.read_csv(test_path, sep=',')
     val_df = pd.read_csv(val_path, sep=',')
+    test_df = pd.read_csv(test_path, sep=',') # hapus kalau sudah integrasi
+    prediction_df = pd.read_csv(test_path, sep=',')
+    prediction_df = prediction_df[['endTime', 'value']]
+    prediction_df['value'] = 0
+    
+    # Univariate Configuration
+    univariate_train_df, univariate_val_df = univariate_configuration(train_df, val_df)
+    print(univariate_train_df.columns, 'val', univariate_val_df.columns)
+    
+    # Assuming df is your DataFrame with 'ds' and 'y'
+    tscv = TimeSeriesSplit(n_splits=5)
+
+    # Split now contains 5 tuples of (train_df, test_df)
+    splits = []
+    for train_idx, test_idx in tscv.split(univariate_train_df):
+        train_split = univariate_train_df.iloc[train_idx]
+        test_split = univariate_train_df.iloc[test_idx]
+        splits.append((train_split, test_split))
+        
+    print(splits)
+    
+    theta_model = ThetaModel()
+    mae = theta_model.train_with_fold(folds=splits)
+    print(mae)
     
     # Check sesonality and trend
-    trend_status = has_trend(time_series=train_df['value'])
-    sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
+    # trend_status = has_trend(time_series=train_df['value'])
+    # sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
+    
+    # print(trend_status, auto_detect_seasonality)
+        
+    ######## Ngebuat model wajib yang bisa di fit, predict, dan saved ke joblib. MAKE SURE parameter bisa diganti2 contoh theta bisa diganti jadi forecast_horizon=48
     
     # # ======= TFT =========
     # train_df_tft = add_time_idx(train_df.copy())
@@ -489,4 +535,4 @@ if __name__ == "__main__":
     # # model.save("models/sarima_final.pkl")
     
     # ======= Exponential Semoothing =========
-    selector = ExponentialSmoothingSelector(time_series=train_df.copy(), has_trend=trend_status, seasonal_periods=sesonality_list)
+    # selector = ExponentialSmoothingSelector(time_series=train_df.copy(), has_trend=trend_status, seasonal_periods=sesonality_list)
