@@ -3,7 +3,7 @@ name: ML Pipeline
 on:
   workflow_dispatch:  # Bisa dijalankan manual dari UI GitHub
   push:
-    branches: [ ci-ml-pipeline ]  # Ganti dengan nama branch kamu, misal: ci-ml-pipeline
+    branches: [ ci-model-pipeline ]  # Ganti dengan nama branch kamu, misal: ci-ml-pipeline
 
 jobs:
   ml-lifecycle:
