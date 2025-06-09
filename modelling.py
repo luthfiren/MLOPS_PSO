@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import pandas as pd
+from scipy.stats import kendalltau
+from statsmodels.tsa.stattools import acf
+from scipy.signal import argrelextrema
 import torch
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
@@ -11,6 +14,7 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing, Holt
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, GroupNormalizer, QuantileLoss
 from lightning.pytorch import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
@@ -54,6 +58,65 @@ import os
 #     print(f"24-step sMAPE: {smape_score:.2f}%")
 
 #     return df
+
+# Several testing or measurement on data
+# ===========================
+def has_trend(time_series, alpha=0.05):
+    """
+    Check if a time series has a significant trend using the Mann-Kendall test.
+    
+    Parameters:
+    - time_series: List or 1D array of values.
+    - alpha: Significance level (default 0.05).
+    
+    Returns:
+    - (bool) True if trend is detected.
+    """
+    n = len(time_series)
+    x = np.arange(n)
+    tau, p_value = kendalltau(x, time_series)
+    return p_value < alpha
+
+def auto_detect_seasonality(time_series, max_period=48, alpha=0.05, min_peak_prominence=0.1):
+    """
+    Efficiently detect candidate seasonality periods in a time series using ACF.
+    
+    Parameters:
+    - time_series: 1D array-like numeric data.
+    - max_period: max lag to check for seasonality.
+    - alpha: significance level for autocorrelation.
+    - min_peak_prominence: minimum relative height to consider an ACF peak significant.
+    
+    Returns:
+    - List of candidate seasonal periods (lags).
+    """
+    ts = np.asarray(time_series)
+    # Detrend by first differencing
+    ts_diff = np.diff(ts)
+    n = len(ts_diff)
+    
+    # 95% confidence interval for zero autocorrelation
+    conf_interval = 1.96 / np.sqrt(n)
+    
+    # Compute ACF up to max_period with FFT for speed on large data
+    acf_vals = acf(ts_diff, nlags=max_period, fft=True)
+    
+    # Focus only on lags from 2 to max_period
+    lags = np.arange(2, max_period+1)
+    acf_subset = acf_vals[2:max_period+1]
+    
+    # Find local maxima in ACF values (candidate seasonality peaks)
+    local_max_idx = argrelextrema(acf_subset, np.greater)[0]
+    local_max_lags = lags[local_max_idx]
+    local_max_vals = acf_subset[local_max_idx]
+    
+    # Filter peaks that exceed confidence interval and min_peak_prominence
+    candidates = local_max_lags[
+        (np.abs(local_max_vals) > conf_interval) & 
+        (local_max_vals > min_peak_prominence)
+    ]
+    
+    return candidates.tolist()
 
 # MODEL SARIMA
 # =============================
@@ -118,6 +181,18 @@ def forecast_sarima(model, steps):
 # =============================
 # FUNGSI EVALUASI
 # =============================
+def generate_time_series_folds(df, date_col, n_splits, horizon):
+    df = df.sort_values(by=date_col)
+    fold_size = len(df) // (n_splits + 1)
+    folds = []
+
+    for i in range(n_splits):
+        train = df.iloc[:fold_size * (i + 1)]
+        test = df.iloc[fold_size * (i + 1): fold_size * (i + 1) + horizon]
+        folds.append((train, test))
+
+    return folds
+
 def evaluate_forecast(y_true, y_pred):
     """Menghitung metrik evaluasi (MAE, RMSE)."""
     mae = mean_absolute_error(y_true, y_pred)
@@ -188,21 +263,75 @@ def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", sea
     plot_forecast(full_data, test_data, test_pred, test_ci)
     
     return final_model
+        
+# # Model ES (Simple Exponential)
+class ExponentialSmoothingSelector:
+    def __init__(self, time_series, has_trend=False, seasonal_periods=None, seasonal_type='add'):
+        self.time_series = np.asarray(time_series)
+        self.has_trend = has_trend
+        self.seasonal_periods = seasonal_periods
+        self.seasonal_type = seasonal_type
 
-# =============================
-# PENGGUNAAN
-# =============================
-if __name__ == "__main__":
-    base_dir = "processed_data"
-    train_path = os.path.join(base_dir, "train.csv")
-    val_path = os.path.join(base_dir, "val.csv")
-    test_path = os.path.join(base_dir, "test.csv")
-    
-    # Jalankan pipeline
-    model = run_sarima_pipeline(train_path, val_path, test_path, target_col="valuex", seasonal_period=24)
-    
-    # Simpan model
-    model.save("models/sarima_final.pkl")
+        # Internal storage
+        self.models = {}
+        self.evaluations = {}
+        self.selected_model_name = None
+        self.best_model = None
+        self.best_forecast = None
+
+    def _train_model(self, model_name, model_cls, **fit_args):
+        try:
+            model = model_cls(self.train_series, **fit_args)
+            fitted = model.fit()
+            forecast = fitted.forecast(self.test_size)
+            metrics = evaluate_forecast(self.test_series, forecast) 
+
+            self.models[model_name] = fitted
+            self.evaluations[model_name] = metrics
+        except Exception as e:
+            print(f"[WARNING] {model_name} failed: {e}")
+
+    def train_and_select(self, test_size=12):
+        self.test_size = test_size
+        self.train_series = self.time_series[:-test_size]
+        self.test_series = self.time_series[-test_size:]
+
+        if not self.has_trend and not self.seasonal_periods:
+            self._train_model("SES", SimpleExpSmoothing)
+        elif self.has_trend and not self.seasonal_periods:
+            self._train_model("Holt", Holt)
+        elif self.seasonal_periods:
+            self._train_model(
+                "Holt-Winters",
+                ExponentialSmoothing,
+                trend='add' if self.has_trend else None,
+                seasonal=self.seasonal_type,
+                seasonal_periods=self.seasonal_periods
+            )
+        else:
+            raise RuntimeError("Invalid combination of trend and seasonality flags.")
+        
+        if not self.evaluations:
+            raise RuntimeError("No models were successfully trained.")
+
+        sorted_models = sorted(
+            self.evaluations.items(),
+            key=lambda x: (x[1]['MAE'] + x[1]['RMSE']) / 2
+        )
+        
+        self.selected_model_name = sorted_models[0][0]
+        self.best_model = self.models[self.selected_model_name]
+        self.best_forecast = self.best_model.forecast(test_size)
+
+        return {
+            'selected_model': self.selected_model_name,
+            'best_forecast': self.best_forecast,
+            'MAE': self.evaluations[self.selected_model_name]['MAE'],
+            'RMSE': self.evaluations[self.selected_model_name]['RMSE']
+        }
+
+    def get_all_evaluations(self):
+        return self.evaluations
 
 
 # # MODEL TFT
@@ -326,25 +455,38 @@ if __name__ == "__main__":
     test_df = pd.read_csv(test_path, sep=',')
     val_df = pd.read_csv(val_path, sep=',')
     
+    # Check sesonality and trend
+    trend_status = has_trend(time_series=train_df['value'])
+    sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
     
-    # ======= TFT =========
-    train_df_tft = add_time_idx(train_df.copy())
-    val_df_tft = add_time_idx(val_df.copy())
-    test_df_tft = add_time_idx(test_df.copy())
+    # # ======= TFT =========
+    # train_df_tft = add_time_idx(train_df.copy())
+    # val_df_tft = add_time_idx(val_df.copy())
+    # test_df_tft = add_time_idx(test_df.copy())
     
-    train_df_tft = add_group_column(train_df_tft)
-    val_df_tft = add_group_column(val_df_tft)
-    test_df_tft = add_group_column(test_df_tft)
+    # train_df_tft = add_group_column(train_df_tft)
+    # val_df_tft = add_group_column(val_df_tft)
+    # test_df_tft = add_group_column(test_df_tft)
 
-    train_ds, val_ds, test_ds_pred = create_datasets(train_df_tft, val_df_tft, test_df_tft)
-    train_dl, val_dl, test_dl_pred = create_dataloaders(train_ds, val_ds, test_ds_pred)
+    # train_ds, val_ds, test_ds_pred = create_datasets(train_df_tft, val_df_tft, test_df_tft)
+    # train_dl, val_dl, test_dl_pred = create_dataloaders(train_ds, val_ds, test_ds_pred)
 
-    # Train
-    model, trainer = build_model(train_ds, train_dl, val_dl)
-    train_model(trainer, model, train_dl, val_dl)
+    # # Train
+    # model, trainer = build_model(train_ds, train_dl, val_dl)
+    # train_model(trainer, model, train_dl, val_dl)
 
-    # Evaluate on val set (which has targets)
-    val_mae, val_rmse = evaluate_model(model, val_dl)
+    # # Evaluate on val set (which has targets)
+    # val_mae, val_rmse = evaluate_model(model, val_dl)
 
-    # Predict on the real test set (no targets)
-    predictions = model.predict(test_dl_pred)
+    # # Predict on the real test set (no targets)
+    # predictions = model.predict(test_dl_pred)
+
+    # # ======= ARIMA =========
+    # # Jalankan pipeline
+    # model = run_sarima_pipeline(train_path, val_path, test_path, target_col="valuex", seasonal_period=24)
+    
+    # # # Simpan model
+    # # model.save("models/sarima_final.pkl")
+    
+    # ======= Exponential Semoothing =========
+    selector = ExponentialSmoothingSelector(time_series=train_df.copy(), has_trend=trend_status, seasonal_periods=sesonality_list)
