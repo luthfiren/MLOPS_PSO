@@ -80,6 +80,7 @@ grandalf==0.8
 graphene==3.4.3
 graphql-core==3.2.6
 graphql-relay==3.2.0
+great_expectations==0.17.21
 greenlet==3.2.2
 grpcio==1.72.1
 gto==1.7.2
