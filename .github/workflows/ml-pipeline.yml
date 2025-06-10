@@ -42,6 +42,21 @@ jobs:
           # python -c "from modelling import train_sarima_model; train_sarima_model()"
           # Or if it has a main function:
           # python -c "from modelling import main; main()"
+          
+      - name: Prepare Deployment Package
+        run: |
+          # Buat direktori 'publish' jika belum ada
+          mkdir -p ./publish
+          # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
+          # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
+          cp -r ./* ./publish/ # Contoh: menyalin semua yang ada di root repo
+          # ATAU lebih spesifik:
+          # cp app.py ./publish/
+          # cp requirements.txt ./publish/
+          # cp -r templates/ ./publish/
+          # cp -r static/ ./publish/
+          # cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
+          # ... tambahkan file/folder lain yang dibutuhkan App Service Anda
 
       - name: Upload Application Artifact
         uses: actions/upload-artifact@v4
