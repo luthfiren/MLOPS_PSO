@@ -199,8 +199,10 @@ def evaluate_forecast(y_true, y_pred):
     print(f"MAE: {mae:.4f}, RMSE: {rmse:.4f}")
     return mae, rmse
 
-def plot_forecast(y_train, y_true, y_pred, pred_ci=None):
-    """Memvisualisasikan hasil forecasting."""
+def plot_forecast(y_train, y_true, y_pred, pred_ci=None, plot_filename="forecast_plot.png"):
+    """
+    Memvisualisasikan hasil forecasting dan menyimpannya sebagai file gambar.
+    """
     plt.figure(figsize=(12,6))
     plt.plot(y_train[-100:], label="Train")
     plt.plot(y_true, label="Actual")
@@ -208,7 +210,14 @@ def plot_forecast(y_train, y_true, y_pred, pred_ci=None):
     if pred_ci is not None:
         plt.fill_between(pred_ci.index, pred_ci.iloc[:,0], pred_ci.iloc[:,1], color='k', alpha=.2)
     plt.legend()
-    plt.show()
+    
+    plots_dir = "plots"
+    os.makedirs(plots_dir, exist_ok=True)
+
+    save_path = os.path.join(plots_dir, plot_filename)
+    plt.savefig(save_path) # Simpan plot sebagai file gambar
+    print(f"Plot saved to {save_path}")
+    plt.close()
 
 # =============================
 # FUNGSI UTAMA (PIPELINE)
@@ -249,7 +258,8 @@ def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", sea
     val_pred, _ = forecast_sarima(model, len(val_data))
     print("Validation Metrics:")
     evaluate_forecast(val_data, val_pred)
-    plot_forecast(train_data, val_data, val_pred)
+    plot_forecast(train_data, val_data, val_pred, plot_filename="sarima_validation_forecast.png")
+    
     
     # 9. Retrain dengan full data
     full_data = pd.concat([train_data, val_data])
@@ -259,7 +269,7 @@ def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", sea
     test_pred, test_ci = forecast_sarima(final_model, len(test_data))
     print("Test Metrics:")
     evaluate_forecast(test_data, test_pred)
-    plot_forecast(full_data, test_data, test_pred, test_ci)
+    plot_forecast(full_data, test_data, test_pred, test_ci, plot_filename="sarima_test_forecast.png")
     
     return final_model
 
