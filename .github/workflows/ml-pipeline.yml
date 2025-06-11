@@ -58,7 +58,7 @@ jobs:
           cp model/champion_score.txt ./publish/model/
           cp model/training.log ./publish/model/
 
-          cp plots/sarima_test_forecast.png ./publish/static/forecast_plot.png
+          cp plots/forecast_plot.png ./publish/static/forecast_plot.png
 
           cp -r templates/ ./publish/
     
