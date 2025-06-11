@@ -1,9 +1,11 @@
 name: ML Pipeline
 
 on:
-  workflow_dispatch:  # Bisa dijalankan manual dari UI GitHub
+  workflow_dispatch:  
   push:
-    branches: [ master ]  # Ganti dengan nama branch kamu, misal: ci-ml-pipeline
+    branches: [ master ] 
+env:
+  AZURE_WEBAPP_NAME: electricity-forecasting-market
 
 jobs:
   ml-lifecycle:
@@ -40,3 +42,47 @@ jobs:
           # python -c "from modelling import train_sarima_model; train_sarima_model()"
           # Or if it has a main function:
           # python -c "from modelling import main; main()"
+          
+      - name: Prepare Deployment Package
+        run: |
+          # Buat direktori 'publish' jika belum ada
+          mkdir -p ./publish
+          # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
+          # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
+          cp -r ./* ./publish/ # Contoh: menyalin semua yang ada di root repo
+          # ATAU lebih spesifik:
+          # cp app.py ./publish/
+          # cp requirements.txt ./publish/
+          # cp -r templates/ ./publish/
+          # cp -r static/ ./publish/
+          # cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
+          # ... tambahkan file/folder lain yang dibutuhkan App Service Anda
+
+      - name: Upload Application Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-package
+          path: ./publish 
+    
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    needs: [ml-lifecycle]
+
+    steps:
+        - uses: actions/checkout@v4
+
+        - name: Download artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: webapp-package 
+            path: ./downloaded-package
+
+        - name: Deploy to Azure Web App
+          uses: azure/webapps-deploy@v2
+          with:
+            app-name: ${{ env.AZURE_WEBAPP_NAME }}
+            publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+            package: ./downloaded-package
+      
+      
