@@ -3,7 +3,7 @@ name: ML Pipeline
 on:
   workflow_dispatch:  
   push:
-    branches: [ master ] 
+    branches: [ deployment-visualisasi ] 
 env:
   AZURE_WEBAPP_NAME: electricity-forecasting-market
 
@@ -36,33 +36,31 @@ jobs:
           
       - name: Train and Evaluate ML Model
         run: |
-          python modelling.py # This assumes modelling.py will execute your training and evaluation logic
-          # If your modelling.py requires specific arguments or functions to be called,
-          # you might need to adjust this line. For example:
-          # python -c "from modelling import train_sarima_model; train_sarima_model()"
-          # Or if it has a main function:
-          # python -c "from modelling import main; main()"
+          python modelling.py
+
           
       - name: Prepare Deployment Package
         run: |
-          # Buat direktori 'publish' jika belum ada
-          mkdir -p ./publish
-          # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
-          # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
-          cp -r ./* ./publish/ # Contoh: menyalin semua yang ada di root repo
-          # ATAU lebih spesifik:
-          # cp app.py ./publish/
-          # cp requirements.txt ./publish/
-          # cp -r templates/ ./publish/
-          # cp -r static/ ./publish/
-          # cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
-          # ... tambahkan file/folder lain yang dibutuhkan App Service Anda
 
-      - name: Upload Application Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: webapp-package
-          path: ./publish 
+          mkdir -p ./publish
+
+          mkdir -p ./publish/model    # Untuk file model ML
+          mkdir -p ./publish/static   # Untuk gambar plot dan aset statis lainnya
+          mkdir -p ./publish/templates # Untuk file HTML template
+
+          cp app.py ./publish/
+
+          cp requirement.txt ./publish/
+
+          cp model/ThetaModel_champion.joblib ./publish/model/
+          cp model/model_champion.joblib ./publish/model/
+          cp model/champion_config.json ./publish/model/
+          cp model/champion_score.txt ./publish/model/
+          cp model/training.log ./publish/model/
+
+          cp plots/sarima_test_forecast.png ./publish/static/forecast_plot.png
+
+          cp -r templates/ ./publish/
     
   deploy:
     name: Deploy to Azure
