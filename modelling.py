@@ -14,7 +14,6 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing, Holt
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, GroupNormalizer, QuantileLoss
 from lightning.pytorch import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
@@ -263,78 +262,6 @@ def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", sea
     plot_forecast(full_data, test_data, test_pred, test_ci)
     
     return final_model
-        
-# # Model ES (Simple Exponential)
-class ExponentialSmoothingSelector:
-    def __init__(self, time_series, has_trend=False, seasonal_periods=None, seasonal_type='add'):
-        self.time_series = np.asarray(time_series)
-        self.has_trend = has_trend
-        self.seasonal_periods = seasonal_periods
-        self.seasonal_type = seasonal_type
-
-        # Internal storage
-        self.models = {}
-        self.evaluations = {}
-        self.selected_model_name = None
-        self.best_model = None
-        self.best_forecast = None
-
-    def _train_model(self, model_name, model_cls, **fit_args):
-        try:
-            model = model_cls(self.train_series, **fit_args)
-            fitted = model.fit()
-            forecast = fitted.forecast(self.test_size)
-            metrics = evaluate_forecast(self.test_series, forecast) 
-
-            self.models[model_name] = fitted
-            self.evaluations[model_name] = metrics
-        except Exception as e:
-            print(f"[WARNING] {model_name} failed: {e}")
-
-    def train_and_select(self, test_size=12):
-        self.test_size = test_size
-        self.train_series = self.time_series[:-test_size]
-        self.test_series = self.time_series[-test_size:]
-
-        if not self.has_trend and not self.seasonal_periods:
-            self._train_model("SES", SimpleExpSmoothing)
-        elif self.has_trend and not self.seasonal_periods:
-            self._train_model("Holt", Holt)
-        elif self.seasonal_periods:
-            self._train_model(
-                "Holt-Winters",
-                ExponentialSmoothing,
-                trend='add' if self.has_trend else None,
-                seasonal=self.seasonal_type,
-                seasonal_periods=self.seasonal_periods
-            )
-        else:
-            raise RuntimeError("Invalid combination of trend and seasonality flags.")
-        
-        if not self.evaluations:
-            raise RuntimeError("No models were successfully trained.")
-
-        sorted_models = sorted(
-            self.evaluations.items(),
-            key=lambda x: (x[1]['MAE'] + x[1]['RMSE']) / 2
-        )
-        
-        self.selected_model_name = sorted_models[0][0]
-        self.best_model = self.models[self.selected_model_name]
-        self.best_forecast = self.best_model.forecast(test_size)
-
-        return {
-            'selected_model': self.selected_model_name,
-            'best_forecast': self.best_forecast,
-            'MAE': self.evaluations[self.selected_model_name]['MAE'],
-            'RMSE': self.evaluations[self.selected_model_name]['RMSE']
-        }
-
-    def get_all_evaluations(self):
-        return self.evaluations
-
-# # Model Theta
-
 
 # # MODEL TFT
 def add_time_idx(df, time_col="endTime"):
@@ -443,10 +370,14 @@ def evaluate_model(model, test_dataloader):
     return mae, rmse
 
 from model import ThetaModel
+from model import ExponentialSmoothingModel
 from sklearn.model_selection import TimeSeriesSplit
 import time
 
-def univariate_configuration(train, val, id_value='series_1'):
+def select_best_model(mae_scores):
+    return min(mae_scores, key=mae_scores.get)
+
+def univariate_configuration(train, val, pred, id_value='series_1'):
     univariate_col = ['endTime', 'value']
     rename_map = {'endTime': 'ds', 'value': 'y'}
     
@@ -455,8 +386,9 @@ def univariate_configuration(train, val, id_value='series_1'):
     
     df_train = prepare_df(train)
     df_validation = prepare_df(val)
+    df_pred = prepare_df(pred)
     
-    return df_train, df_validation
+    return df_train, df_validation, df_pred
 
 # 🧪 Example Usage
 if __name__ == "__main__":
@@ -474,12 +406,14 @@ if __name__ == "__main__":
     val_df = pd.read_csv(val_path, sep=',')
     test_df = pd.read_csv(test_path, sep=',') # hapus kalau sudah integrasi
     prediction_df = pd.read_csv(test_path, sep=',')
-    prediction_df = prediction_df[['endTime', 'value']]
-    prediction_df['value'] = 0
-    
+    prediction_df['value'] = 0.0
+        
+    # Check sesonality and trend
+    trend_status = has_trend(time_series=train_df['value'])
+    sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
+        
     # Univariate Configuration
-    univariate_train_df, univariate_val_df = univariate_configuration(train_df, val_df)
-    print(univariate_train_df.columns, 'val', univariate_val_df.columns)
+    univariate_train_df, univariate_val_df, univariate_pred_df = univariate_configuration(train_df, val_df, prediction_df)
     
     # Assuming df is your DataFrame with 'ds' and 'y'
     tscv = TimeSeriesSplit(n_splits=5)
@@ -490,15 +424,38 @@ if __name__ == "__main__":
         train_split = univariate_train_df.iloc[train_idx]
         test_split = univariate_train_df.iloc[test_idx]
         splits.append((train_split, test_split))
-            
+    
+    # Theta modelling 
     theta_model = ThetaModel()
     theta_mae = theta_model.train_with_fold(folds=splits)
-    print(theta_mae)
+        
+    # Exponential smoothing modelling
+    es_model = ExponentialSmoothingModel(has_trend=trend_status)
+    es_mae = es_model.train_with_fold(folds=splits)
     
-    # Check sesonality and trend
-    # trend_status = has_trend(time_series=train_df['value'])
-    # sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
+    mae_scores = {
+        'Theta': theta_mae,
+        'ES': es_mae,
+        # tambahkan model lain jika ada
+    }
+
+    best_model_name = select_best_model(mae_scores)
     
+    # Predict using best model
+    if best_model_name == 'Theta':
+        theta_model.optimize(df=univariate_train_df, season_list=sesonality_list)
+        # predictions = theta_model.predict(pred_df=univariate_pred_df)
+    elif best_model_name == 'ES':
+        es_model.optimize(df=univariate_train_df, season_list=sesonality_list)
+        # predictions = es_model.predict(pred_df=univariate_pred_df)
+
+    # es_model.optimize(df=univariate_train_df, season_list=sesonality_list)
+    
+    # predictions = es_model.predict(pred_df = univariate_pred_df)
+    # print(predictions, 'prediction')
+    
+    print('selesai saving')
+        
     # print(trend_status, auto_detect_seasonality)
         
     ######## Ngebuat model wajib yang bisa di fit, predict, dan saved ke joblib. MAKE SURE parameter bisa diganti2 contoh theta bisa diganti jadi forecast_horizon=48

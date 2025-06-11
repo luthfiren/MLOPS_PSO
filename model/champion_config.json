@@ -1,0 +1,6 @@
+{
+    "season_length": 21,
+    "frequency": "h",
+    "forecast_horizon": 24,
+    "n_jobs": 5
+}

@@ -1,3 +1,12 @@
-2025-06-09 15:38:14,263 - ThetaModel - ThetaModel Average MAE across 5 folds = 0.8186
-2025-06-09 15:52:40,554 - ThetaModel - ThetaModel Average MAE across 5 folds = 0.8186
-2025-06-09 15:55:08,740 - ThetaModel - ThetaModel Average MAE across 5 folds = 0.8186, Training Time = 0.12 seconds
+2025-06-10 12:12:09,495 - ThetaModel - INFO - ThetaModel Average MAE across 5 folds = 0.8186, Training Time = 0.22 seconds
+2025-06-10 12:12:09,822 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 5 folds = 0.9124, Training Time = 0.33 seconds
+2025-06-10 12:13:04,862 - ThetaModel - INFO - ThetaModel Average MAE across 5 folds = 0.8186, Training Time = 0.08 seconds
+2025-06-10 12:13:05,223 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 5 folds = 0.9124, Training Time = 0.36 seconds
+2025-06-10 12:14:42,024 - ThetaModel - INFO - ThetaModel Average MAE across 5 folds = 0.8186, Training Time = 0.09 seconds
+2025-06-10 12:14:42,471 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 5 folds = 0.9124, Training Time = 0.45 seconds
+2025-06-10 12:17:32,946 - ThetaModel - INFO - ThetaModel Average MAE across 5 folds = 0.8186, Training Time = 0.14 seconds
+2025-06-10 12:17:33,505 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 5 folds = 0.9124, Training Time = 0.56 seconds
+2025-06-10 12:17:33,635 - ThetaModel - INFO - Saved champion model to C:\DataD\MATKUL\Semester_6\pso\MLOPS_PSO\model\ThetaModel_champion.joblib
+2025-06-10 12:17:33,635 - ThetaModel - INFO - Saved champion config to C:\DataD\MATKUL\Semester_6\pso\MLOPS_PSO\model\champion_config.json
+2025-06-10 12:17:33,635 - ThetaModel - INFO - Champion model score (0.2621389620553691) saved to C:\DataD\MATKUL\Semester_6\pso\MLOPS_PSO\model\champion_score.txt
+2025-06-10 12:17:33,636 - ThetaModel - INFO - New champion saved: {'forecast_horizon': 24, 'season_length': 21} | Score: 0.2621389620553691
