@@ -1,0 +1,106 @@
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f4f7f6; /* Light gray background */
+    color: #333;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* Header Styling */
+header {
+    background-color: #2c3e50; /* Dark blue-gray */
+    color: #ffffff;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+header h1 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    font-size: 2.2rem;
+}
+
+header p {
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+
+/* Dashboard Container (Main Content) */
+.dashboard-container {
+    display: flex;
+    flex-wrap: wrap; /* Allows cards to wrap to the next line */
+    justify-content: center; /* Center cards horizontally */
+    gap: 1.5rem; /* Space between cards */
+    padding: 2rem 1rem;
+    max-width: 1200px; /* Max width for the whole dashboard */
+    margin: 2rem auto; /* Center the container */
+    flex-grow: 1; /* Allows main content to take available space */
+}
+
+/* Dashboard Card Styling */
+.dashboard-card {
+    background-color: #ffffff;
+    border-radius: 12px; /* Rounded corners */
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); /* Soft shadow */
+    padding: 1.5rem;
+    text-align: center;
+    flex: 1 1 calc(50% - 1.5rem); /* Two cards per row on larger screens */
+    min-width: 300px; /* Minimum width for cards */
+    max-width: 550px; /* Maximum width for cards */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.dashboard-card h2 {
+    color: #34495e; /* Slightly darker text for headings */
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.6rem;
+}
+
+.dashboard-card img {
+    max-width: 100%; /* Ensure images are responsive */
+    height: auto;
+    border-radius: 8px; /* Rounded corners for images */
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.dashboard-card p {
+    font-size: 0.95rem;
+    color: #555;
+    margin-bottom: 0;
+}
+
+.card-description {
+    font-size: 0.85rem;
+    color: #777;
+    margin-top: 0.5rem;
+}
+
+
+/* Footer Styling */
+footer {
+    background-color: #34495e; /* Darker blue-gray */
+    color: #ecf0f1;
+    text-align: center;
+    padding: 1rem;
+    margin-top: auto; /* Pushes footer to the bottom */
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .dashboard-card {
+        flex: 1 1 100%; /* One card per row on smaller screens */
+    }
+
+    header h1 {
+        font-size: 1.8rem;
+    }
+}

@@ -46,7 +46,11 @@ jobs:
       - name: Prepare Deployment Package
         run: |
           # Buat direktori 'publish' jika belum ada
-          mkdir -p ./publish
+          mkdir -p ./publish/data/forecasts/
+          mkdir -p ./publish/artifacts/metrics/
+          mkdir -p ./publish/artifacts/models/ # Untuk model yang sudah dilatih
+          mkdir -p ./publish/templates/ # Untuk template HTML
+          mkdir -p ./publish/static/
           # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
           # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
           cp -r ./* ./publish/ # Contoh: menyalin semua yang ada di root repo

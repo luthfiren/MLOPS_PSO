@@ -1,10 +1,8 @@
-import pandas as pd
 import numpy as np
 import pandas as pd
 from scipy.stats import kendalltau
 from statsmodels.tsa.stattools import acf
 from scipy.signal import argrelextrema
-import torch
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
@@ -14,6 +12,7 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing, Holt
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, GroupNormalizer, QuantileLoss
 from lightning.pytorch import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
@@ -21,6 +20,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from pytorch_lightning.loggers import TensorBoardLogger
 
 import os
+import json
+import joblib
 
 # # Step by step
 # inital git repository, create venv, install base dependencies, create requirement.txt, simulate data read and preprocessing, versioned the data
@@ -60,6 +61,59 @@ import os
 
 # Several testing or measurement on data
 # ===========================
+
+# ====================================================================================================
+# TAMBAHAN: Fungsi untuk menyimpan output
+# ====================================================================================================
+
+def save_forecast_to_csv(forecast_df, file_path="data/forecasts/latest_forecast.csv"):
+    """
+    Menyimpan DataFrame hasil prediksi ke file CSV.
+    Forecast_df harus memiliki kolom 'tanggal_jam' dan 'predicted_price'.
+    """
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    forecast_df.to_csv(file_path, index=False)
+    print(f"Hasil prediksi disimpan ke: {file_path}")
+
+def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metrics.json"):
+    """
+    Menyimpan metrik model ke file JSON.
+    Metrik_dict harus berisi MAE, tanggal pelatihan, dll.
+    """
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    
+    # Tambahkan timestamp saat ini ke metrik
+    metrics_dict['training_date'] = pd.Timestamp.now().isoformat()
+
+    # Baca file yang sudah ada, tambahkan metrik baru, lalu tulis kembali
+    # Ini penting agar dashboard bisa membaca semua riwayat metrik
+    all_metrics = []
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r') as f:
+                all_metrics = json.load(f)
+            if not isinstance(all_metrics, list): # Handle case if it's just one dict
+                all_metrics = [all_metrics]
+        except json.JSONDecodeError:
+            print(f"Warning: Existing {file_path} is corrupted. Overwriting.")
+            all_metrics = []
+
+    all_metrics.append(metrics_dict)
+    
+    with open(file_path, 'w') as f:
+        json.dump(all_metrics, f, indent=4)
+    print(f"Metrik model disimpan ke: {file_path}")
+
+def save_model_artifact(model, file_path="artifacts/models/sarima_model.joblib"):
+    """
+    Menyimpan objek model yang terlatih.
+    """
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    joblib.dump(model, file_path)
+    print(f"Model disimpan ke: {file_path}")
+
+#=============================================================================================
+
 def has_trend(time_series, alpha=0.05):
     """
     Check if a time series has a significant trend using the Mann-Kendall test.
@@ -213,55 +267,177 @@ def plot_forecast(y_train, y_true, y_pred, pred_ci=None):
 # =============================
 # FUNGSI UTAMA (PIPELINE)
 # =============================
-def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", seasonal_period=24):
+def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", seasonal_period=24, forecast_horizon=24):
     """Pipeline lengkap SARIMA dari data hingga evaluasi."""
-    # 1. Load Data
+    # Load Data
     train_df = load_data(train_path)
     val_df = load_data(val_path)
     test_df = load_data(test_path)
     
-    # 2. Tambahkan fitur waktu
+    # Tambahkan fitur waktu
     train_df = add_time_features(train_df, target_col)
     val_df = add_time_features(val_df, target_col)
     test_df = add_time_features(test_df, target_col)
     
-    # 3. Gabungkan data
-    full_df = pd.concat([train_df, val_df, test_df])
+    # Gabungkan data
+    full_training_data = pd.concat([train_df[target_col], val_df[target_col]])
     
-    # 4. Cek stationeritas
-    series = full_df[target_col]
-    is_stationary = check_stationarity(series)
+    # Cek stationeritas
+    series_for_param_id = full_training_data.copy()
+    is_stationary = check_stationarity(series_for_param_id)
     if not is_stationary:
-        series = apply_differencing(series, d=1, D=1, seasonal_period=seasonal_period)
+        series_for_param_id = apply_differencing(series_for_param_id, d=1, D=1, seasonal_period=seasonal_period)
     
-    # 5. Split kembali ke train/val/test
-    train_data = series.loc[train_df.index]
-    val_data = series.loc[val_df.index]
-    test_data = series.loc[test_df.index]
+    # Identifikasi parameter
+    order, seasonal_order = identify_parameters(series_for_param_id, seasonal_period)
     
-    # 6. Identifikasi parameter
-    order, seasonal_order = identify_parameters(series, seasonal_period)
+    # Train model
+    final_model = train_sarima_model(full_training_data, order, seasonal_order)
     
-    # 7. Train model
-    model = train_sarima_model(train_data, order, seasonal_order)
+    # jika test_df adalah data aktual untuk evaluasi
+    if target_col in test_df.columns:
+        # Lakukan prediksi untuk evaluasi performa pada `test_df`
+        test_pred_series, test_ci = forecast_sarima(final_model, len(test_df))
+        print("Test Metrics:")
+        test_mae, test_rmse = evaluate_forecast(test_df[target_col], test_pred_series)
+        forecast_output_df = pd.DataFrame({
+            'tanggal_jam': test_pred_series.index,
+            'predicted_price': test_pred_series.values
+        })
     
-    # 8. Validasi
-    val_pred, _ = forecast_sarima(model, len(val_data))
-    print("Validation Metrics:")
-    evaluate_forecast(val_data, val_pred)
-    plot_forecast(train_data, val_data, val_pred)
+    # Tambahkan kolom aktual untuk perbandingan (untuk kebutuhan dashboard/backtesting)
+        # Ini penting agar plot 'Prediksi vs Aktual' di dashboard bisa dibuat
+        # Perlu dipastikan test_df memiliki kolom actual_price atau target_col
+        forecast_output_df['actual_price'] = test_df[target_col].values
+
+
+    # Simpan hasil prediksi
+        save_forecast_to_csv(forecast_output_df, "data/forecasts/latest_forecast.csv")
+
+        # Simpan metrik
+        metrics = {
+            "model_name": "SARIMA",
+            "MAE": test_mae,
+            "RMSE": test_rmse,
+            "forecast_horizon": len(test_pred_series),
+            "order": order,
+            "seasonal_order": seasonal_order
+        }
+        save_metrics_to_json(metrics, "artifacts/metrics/sarima_metrics.json")
     
-    # 9. Retrain dengan full data
-    full_data = pd.concat([train_data, val_data])
-    final_model = train_sarima_model(full_data, order, seasonal_order)
-    
-    # 10. Test
-    test_pred, test_ci = forecast_sarima(final_model, len(test_data))
-    print("Test Metrics:")
-    evaluate_forecast(test_data, test_pred)
-    plot_forecast(full_data, test_data, test_pred, test_ci)
+    # Jika `test_df` dimaksudkan sebagai data *masa depan tanpa aktual*:
+    else:
+        # Buat index waktu untuk horizon prediksi yang sesungguhnya (misalnya, 24 jam ke depan)
+        last_timestamp_in_training = full_training_data.index[-1]
+        future_index = pd.date_range(start=last_timestamp_in_training + pd.Timedelta(hours=1), 
+                                     periods=forecast_horizon, 
+                                     freq='H') # Sesuaikan frekuensi ('H' untuk jam, 'D' untuk hari, dll.)
+
+        future_pred_series, future_ci = forecast_sarima(final_model, forecast_horizon)
+        
+        # Pastikan index prediksi sesuai dengan future_index yang dibuat
+        future_pred_series.index = future_index
+        future_ci.index = future_index
+
+        forecast_output_df = pd.DataFrame({
+            'tanggal_jam': future_pred_series.index,
+            'predicted_price': future_pred_series.values
+        })
+        
+        # Karena tidak ada aktual, kolom 'actual_price' akan diisi NaN atau tidak ada
+        # Untuk tujuan dashboard "prediksi vs aktual", Anda harus menyertakan file historical_actuals.csv terpisah
+        # seperti yang saya sebutkan di balasan sebelumnya.
+
+        save_forecast_to_csv(forecast_output_df, "data/forecasts/latest_forecast_future.csv")
+
+        # Metrik dihitung dari validasi/uji, bukan dari prediksi masa depan
+        val_pred_series, _ = forecast_sarima(final_model, len(val_df)) # Lakukan lagi prediksi untuk validasi
+        val_mae, val_rmse = evaluate_forecast(val_df[target_col], val_pred_series)
+
+        metrics = {
+            "model_name": "SARIMA",
+            "MAE_validation": val_mae,
+            "RMSE_validation": val_rmse,
+            "forecast_horizon": forecast_horizon, # Horizon prediksi yang disimpan
+            "order": order,
+            "seasonal_order": seasonal_order
+        }
+        save_metrics_to_json(metrics, "artifacts/metrics/sarima_metrics.json")
+
+    # Simpan model untuk deployment
+    save_model_artifact(final_model, "artifacts/models/sarima_model.joblib")
     
     return final_model
+        
+# # Model ES (Simple Exponential)
+class ExponentialSmoothingSelector:
+    def __init__(self, time_series, has_trend=False, seasonal_periods=None, seasonal_type='add'):
+        self.time_series = np.asarray(time_series)
+        self.has_trend = has_trend
+        self.seasonal_periods = seasonal_periods
+        self.seasonal_type = seasonal_type
+
+        # Internal storage
+        self.models = {}
+        self.evaluations = {}
+        self.selected_model_name = None
+        self.best_model = None
+        self.best_forecast = None
+
+    def _train_model(self, model_name, model_cls, **fit_args):
+        try:
+            model = model_cls(self.train_series, **fit_args)
+            fitted = model.fit()
+            forecast = fitted.forecast(self.test_size)
+            metrics = evaluate_forecast(self.test_series, forecast) 
+
+            self.models[model_name] = fitted
+            self.evaluations[model_name] = metrics
+        except Exception as e:
+            print(f"[WARNING] {model_name} failed: {e}")
+
+    def train_and_select(self, test_size=12):
+        self.test_size = test_size
+        self.train_series = self.time_series[:-test_size]
+        self.test_series = self.time_series[-test_size:]
+
+        if not self.has_trend and not self.seasonal_periods:
+            self._train_model("SES", SimpleExpSmoothing)
+        elif self.has_trend and not self.seasonal_periods:
+            self._train_model("Holt", Holt)
+        elif self.seasonal_periods:
+            self._train_model(
+                "Holt-Winters",
+                ExponentialSmoothing,
+                trend='add' if self.has_trend else None,
+                seasonal=self.seasonal_type,
+                seasonal_periods=self.seasonal_periods
+            )
+        else:
+            raise RuntimeError("Invalid combination of trend and seasonality flags.")
+        
+        if not self.evaluations:
+            raise RuntimeError("No models were successfully trained.")
+
+        sorted_models = sorted(
+            self.evaluations.items(),
+            key=lambda x: (x[1]['MAE'] + x[1]['RMSE']) / 2
+        )
+        
+        self.selected_model_name = sorted_models[0][0]
+        self.best_model = self.models[self.selected_model_name]
+        self.best_forecast = self.best_model.forecast(test_size)
+
+        return {
+            'selected_model': self.selected_model_name,
+            'best_forecast': self.best_forecast,
+            'MAE': self.evaluations[self.selected_model_name]['MAE'],
+            'RMSE': self.evaluations[self.selected_model_name]['RMSE']
+        }
+
+    def get_all_evaluations(self):
+        return self.evaluations
+
 
 # # MODEL TFT
 def add_time_idx(df, time_col="endTime"):
@@ -369,93 +545,63 @@ def evaluate_model(model, test_dataloader):
     print(f"Test MAE: {mae:.4f}, RMSE: {rmse:.4f}")
     return mae, rmse
 
-from model import ThetaModel
-from model import ExponentialSmoothingModel
-from sklearn.model_selection import TimeSeriesSplit
-import time
+# from model import ThetaModel
+# from sklearn.model_selection import TimeSeriesSplit
+# import time
 
-def select_best_model(mae_scores):
-    return min(mae_scores, key=mae_scores.get)
-
-def univariate_configuration(train, val, pred, id_value='series_1'):
-    univariate_col = ['endTime', 'value']
-    rename_map = {'endTime': 'ds', 'value': 'y'}
+# def univariate_configuration(train, val, id_value='series_1'):
+#     univariate_col = ['endTime', 'value']
+#     rename_map = {'endTime': 'ds', 'value': 'y'}
     
-    def prepare_df(df):
-        return df.loc[:, univariate_col].rename(columns=rename_map).assign(unique_id=id_value)
+#     def prepare_df(df):
+#         return df.loc[:, univariate_col].rename(columns=rename_map).assign(unique_id=id_value)
     
-    df_train = prepare_df(train)
-    df_validation = prepare_df(val)
-    df_pred = prepare_df(pred)
+#     df_train = prepare_df(train)
+#     df_validation = prepare_df(val)
     
-    return df_train, df_validation, df_pred
+#     return df_train, df_validation
 
-# 🧪 Example Usage
-if __name__ == "__main__":
-    # Define base path
-    base_dir = os.path.join(os.path.dirname(__file__), 'processed_data')
+# # 🧪 Example Usage
+# if __name__ == "__main__":
+#     # Define base path
+#     base_dir = os.path.join(os.path.dirname(__file__), 'processed_data')
 
-    # File paths
-    train_path = os.path.join(base_dir, 'train.csv')
-    val_path = os.path.join(base_dir, 'val.csv')
-    test_path = os.path.join(base_dir, 'test.csv') # hapus kalau sudah integrasi
-    prediction_path = os.path.join(base_dir, 'test.csv')
+#     # File paths
+#     train_path = os.path.join(base_dir, 'train.csv')
+#     val_path = os.path.join(base_dir, 'val.csv')
+#     test_path = os.path.join(base_dir, 'test.csv') # hapus kalau sudah integrasi
+#     prediction_path = os.path.join(base_dir, 'test.csv')
 
-    # Read CSV files
-    train_df = pd.read_csv(train_path, sep=',')
-    val_df = pd.read_csv(val_path, sep=',')
-    test_df = pd.read_csv(test_path, sep=',') # hapus kalau sudah integrasi
-    prediction_df = pd.read_csv(test_path, sep=',')
-    prediction_df['value'] = 0.0
-        
+#     # Read CSV files
+#     train_df = pd.read_csv(train_path, sep=',')
+#     val_df = pd.read_csv(val_path, sep=',')
+#     test_df = pd.read_csv(test_path, sep=',') # hapus kalau sudah integrasi
+#     prediction_df = pd.read_csv(test_path, sep=',')
+#     prediction_df = prediction_df[['endTime', 'value']]
+#     prediction_df['value'] = 0
+    
+#     # Univariate Configuration
+#     univariate_train_df, univariate_val_df = univariate_configuration(train_df, val_df)
+#     print(univariate_train_df.columns, 'val', univariate_val_df.columns)
+    
+#     # Assuming df is your DataFrame with 'ds' and 'y'
+#     tscv = TimeSeriesSplit(n_splits=5)
+
+#     # Split now contains 5 tuples of (train_df, test_df)
+#     splits = []
+#     for train_idx, test_idx in tscv.split(univariate_train_df):
+#         train_split = univariate_train_df.iloc[train_idx]
+#         test_split = univariate_train_df.iloc[test_idx]
+#         splits.append((train_split, test_split))
+            
+#     theta_model = ThetaModel()
+#     theta_mae = theta_model.train_with_fold(folds=splits)
+#     print(theta_mae)
+    
     # Check sesonality and trend
-    trend_status = has_trend(time_series=train_df['value'])
-    sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
-        
-    # Univariate Configuration
-    univariate_train_df, univariate_val_df, univariate_pred_df = univariate_configuration(train_df, val_df, prediction_df)
+    # trend_status = has_trend(time_series=train_df['value'])
+    # sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
     
-    # Assuming df is your DataFrame with 'ds' and 'y'
-    tscv = TimeSeriesSplit(n_splits=5)
-
-    # Split now contains 5 tuples of (train_df, test_df)
-    splits = []
-    for train_idx, test_idx in tscv.split(univariate_train_df):
-        train_split = univariate_train_df.iloc[train_idx]
-        test_split = univariate_train_df.iloc[test_idx]
-        splits.append((train_split, test_split))
-    
-    # Theta modelling 
-    theta_model = ThetaModel()
-    theta_mae = theta_model.train_with_fold(folds=splits)
-        
-    # Exponential smoothing modelling
-    es_model = ExponentialSmoothingModel(has_trend=trend_status)
-    es_mae = es_model.train_with_fold(folds=splits)
-    
-    mae_scores = {
-        'Theta': theta_mae,
-        'ES': es_mae,
-        # tambahkan model lain jika ada
-    }
-
-    best_model_name = select_best_model(mae_scores)
-    
-    # Predict using best model
-    if best_model_name == 'Theta':
-        theta_model.optimize(df=univariate_train_df, season_list=sesonality_list)
-        # predictions = theta_model.predict(pred_df=univariate_pred_df)
-    elif best_model_name == 'ES':
-        es_model.optimize(df=univariate_train_df, season_list=sesonality_list)
-        # predictions = es_model.predict(pred_df=univariate_pred_df)
-
-    # es_model.optimize(df=univariate_train_df, season_list=sesonality_list)
-    
-    # predictions = es_model.predict(pred_df = univariate_pred_df)
-    # print(predictions, 'prediction')
-    
-    print('selesai saving')
-        
     # print(trend_status, auto_detect_seasonality)
         
     ######## Ngebuat model wajib yang bisa di fit, predict, dan saved ke joblib. MAKE SURE parameter bisa diganti2 contoh theta bisa diganti jadi forecast_horizon=48
@@ -491,3 +637,27 @@ if __name__ == "__main__":
     
     # ======= Exponential Semoothing =========
     # selector = ExponentialSmoothingSelector(time_series=train_df.copy(), has_trend=trend_status, seasonal_periods=sesonality_list)
+
+    # =============================
+# Main execution block
+# =============================
+if __name__ == "__main__":
+    # Path ke data Anda (sesuaikan dengan lokasi file Anda)
+    train_data_path = 'processed_data/train.csv' # Contoh
+    val_data_path = 'processed_data/val.csv'     # Contoh
+    test_data_path = 'processed_data/test.csv'   # Contoh (bisa jadi data yang ingin diprediksi masa depan atau data uji aktual)
+    
+    # Pastikan file data Anda memiliki kolom 'timestamp' dan 'value' (atau target_col Anda)
+    # Jika test_data_path adalah data *masa depan* tanpa aktual, pastikan itu sesuai.
+
+    # Menjalankan pipeline SARIMA
+    print("Running SARIMA Pipeline...")
+    final_sarima_model = run_sarima_pipeline(
+        train_path=train_data_path,
+        val_path=val_data_path,
+        test_path=test_data_path,
+        target_col="value", # Sesuaikan dengan nama kolom target Anda
+        seasonal_period=24,  # Sesuaikan dengan perioda musiman data Anda (misalnya 24 jam)
+        forecast_horizon=24 # Berapa jam ke depan Anda ingin memprediksi
+    )
+    print("SARIMA Pipeline Finished.")
