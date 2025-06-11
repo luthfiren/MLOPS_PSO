@@ -258,7 +258,7 @@ def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", sea
     val_pred, _ = forecast_sarima(model, len(val_data))
     print("Validation Metrics:")
     evaluate_forecast(val_data, val_pred)
-    plot_forecast(train_data, val_data, val_pred, plot_filename="sarima_validation_forecast.png")
+    plot_forecast(train_data, val_data, val_pred, plot_filename="forecast_plot.png")
     
     
     # 9. Retrain dengan full data
@@ -269,7 +269,7 @@ def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", sea
     test_pred, test_ci = forecast_sarima(final_model, len(test_data))
     print("Test Metrics:")
     evaluate_forecast(test_data, test_pred)
-    plot_forecast(full_data, test_data, test_pred, test_ci, plot_filename="sarima_test_forecast.png")
+    plot_forecast(full_data, test_data, test_pred, test_ci, plot_filename="forecast_plot.png")
     
     return final_model
 
