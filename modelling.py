@@ -500,7 +500,9 @@ if __name__ == "__main__":
 
     # # ======= ARIMA =========
     # # Jalankan pipeline
-    # model = run_sarima_pipeline(train_path, val_path, test_path, target_col="valuex", seasonal_period=24)
+    print("DEBUG: Starting SARIMA pipeline execution.")
+    sarima_final_model = run_sarima_pipeline(train_path, val_path, test_path, target_col="value", seasonal_period=24) # Perbaiki target_col menjadi "value"
+    print("DEBUG: SARIMA pipeline finished.")
     
     # # # Simpan model
     # # model.save("models/sarima_final.pkl")
