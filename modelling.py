@@ -416,6 +416,12 @@ if __name__ == "__main__":
     val_df = pd.read_csv(val_path, sep=',')
     test_df = pd.read_csv(test_path, sep=',') # hapus kalau sudah integrasi
     prediction_df = pd.read_csv(test_path, sep=',')
+    
+    train_df['endTime'] = pd.to_datetime(train_df['endTime'])
+    val_df['endTime'] = pd.to_datetime(val_df['endTime'])
+    test_df['endTime'] = pd.to_datetime(test_df['endTime'])
+    prediction_df['endTime'] = pd.to_datetime(prediction_df['endTime'])
+    
     prediction_df['value'] = 0.0
         
     # Check sesonality and trend
