@@ -1,7 +1,7 @@
 # app.py
 import joblib
 import os
-from flask import Flask, render_template, send_from_directory # Tambahkan render_template dan send_from_directory
+from flask import Flask, render_template, send_from_directory, request, jsonify, url_for
 
 app = Flask(__name__, 
             static_folder='static', # Mengatur folder statis untuk Flask
@@ -20,6 +20,7 @@ except Exception as e:
 @app.route('/')
 def home():
     # Render template HTML dan berikan path gambar plot
+    forecast_image_url = url_for('static', filename='forecast_plot.png')
     # Pastikan 'forecast_plot.png' ada di folder 'static' yang dideploy
     return render_template('index.html', forecast_image_url='/static/forecast_plot.png')
 
