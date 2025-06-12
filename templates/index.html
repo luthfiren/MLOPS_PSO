@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard MLOps Pasar Listrik Finlandia</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
+    <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
+    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap)" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <h1>Dashboard Monitoring MLOps</h1>
+        <p>Prediksi Harga Pasar Listrik Finlandia</p>
+    </header>
+
+    <main class="dashboard-container">
+        <!-- Visualisasi 1: Prediksi vs Aktual -->
+        <section class="dashboard-card">
+            <h2>Prediksi Harga Listrik vs. Aktual (Historis)</h2>
+            {% if plot_forecast_vs_actual %}
+            <img src="data:image/png;base64,{{ plot_forecast_vs_actual }}" alt="Prediksi vs Aktual">
+            {% else %}
+            <p>Data prediksi vs. aktual tidak tersedia.</p>
+            {% endif %}
+            <p class="card-description">Grafik ini membandingkan hasil prediksi model kami dengan data harga aktual historis yang telah tersedia. Ideal untuk backtesting performa model.</p>
+        </section>
+
+        <!-- Visualisasi 2: Tren MAE Model -->
+        <section class="dashboard-card">
+            <h2>Kinerja Model: Tren MAE Seiring Waktu</h2>
+            {% if plot_mae_trend %}
+            <img src="data:image/png;base64,{{ plot_mae_trend }}" alt="Tren MAE">
+            {% else %}
+            <p>Data tren MAE model tidak tersedia.</p>
+            {% endif %}
+            <p class="card-description">Melihat tren Mean Absolute Error (MAE) dari setiap pelatihan ulang model, memberikan gambaran apakah kualitas model membaik atau menurun.</p>
+        </section>
+
+        <!-- Visualisasi 3: Waktu Penyelesaian Pipeline -->
+        <section class="dashboard-card">
+            <h2>Waktu Penyelesaian Pipeline ML</h2>
+            {% if plot_pipeline_timings %}
+            <img src="data:image/png;base64,{{ plot_pipeline_timings }}" alt="Waktu Pipeline">
+            {% else %}
+            <p>Data waktu penyelesaian pipeline tidak tersedia.</p>
+            {% endif %}
+            <p class="card-description">Memantau durasi eksekusi pipeline ML kami untuk memastikan prediksi dapat dihasilkan dan ter-deploy tepat waktu setiap hari.</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Proyek MLOps. Semua Hak Dilindungi.</p>
+    </footer>
+</body>
+</html>

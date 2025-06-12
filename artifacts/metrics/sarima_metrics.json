@@ -1,0 +1,20 @@
+[
+    {
+        "model_name": "SARIMA",
+        "MAE": 1.403020169896115,
+        "RMSE": 1.5297104493819207,
+        "forecast_horizon": 51,
+        "order": [
+            2,
+            1,
+            1
+        ],
+        "seasonal_order": [
+            1,
+            1,
+            1,
+            24
+        ],
+        "training_date": "2025-06-12T05:05:09.526458"
+    }
+]
