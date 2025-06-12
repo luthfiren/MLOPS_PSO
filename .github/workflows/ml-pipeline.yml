@@ -53,13 +53,11 @@ jobs:
           mkdir -p ./publish/static/
           # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
           # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
-          cp -r ./* ./publish/ # Contoh: menyalin semua yang ada di root repo
-          # ATAU lebih spesifik:
-          # cp app.py ./publish/
-          # cp requirements.txt ./publish/
-          # cp -r templates/ ./publish/
-          # cp -r static/ ./publish/
-          # cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
+          cp app.py ./publish/
+          cp requirements.txt ./publish/
+          cp -r templates/ ./publish/
+          cp -r static/ ./publish/
+          cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
           # ... tambahkan file/folder lain yang dibutuhkan App Service Anda
 
       - name: Upload Application Artifact
