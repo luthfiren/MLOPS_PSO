@@ -54,10 +54,10 @@ jobs:
           # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
           # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
           cp app.py ./publish/
-          cp requirements.txt ./publish/
+          cp requirement.txt ./publish/
           cp -r templates/ ./publish/
           cp -r static/ ./publish/
-          cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
+          # cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
           # ... tambahkan file/folder lain yang dibutuhkan App Service Anda
 
       - name: Upload Application Artifact
