@@ -5,7 +5,7 @@ on:
   push:
     branches: [ webadded ] 
 env:
-  AZURE_WEBAPP_NAME: electricity-forecasting-market
+  AZURE_WEBAPP_NAME: electricity-market-forecasting
 
 jobs:
   ml-lifecycle:
