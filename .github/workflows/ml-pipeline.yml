@@ -3,7 +3,7 @@ name: ML Pipeline
 on:
   workflow_dispatch:  
   push:
-    branches: [ master ] 
+    branches: [ webadded ] 
 env:
   AZURE_WEBAPP_NAME: electricity-forecasting-market
 
