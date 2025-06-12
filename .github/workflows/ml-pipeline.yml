@@ -45,7 +45,7 @@ jobs:
           
       - name: Prepare Deployment Package
         run: |
-          # Buat direktori 'publish' jika belum ada
+          # Buat direktori publish jika belum ada
           mkdir -p ./publish/data/forecasts/
           mkdir -p ./publish/artifacts/metrics/
           mkdir -p ./publish/artifacts/models/ # Untuk model yang sudah dilatih
