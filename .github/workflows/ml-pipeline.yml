@@ -3,9 +3,9 @@ name: ML Pipeline
 on:
   workflow_dispatch:  
   push:
-    branches: [ master ] 
+    branches: [ webadded ] 
 env:
-  AZURE_WEBAPP_NAME: electricity-forecasting-market
+  AZURE_WEBAPP_NAME: electricity-market-forecasting
 
 jobs:
   ml-lifecycle:
@@ -54,10 +54,17 @@ jobs:
           # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
           # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
           cp app.py ./publish/
+<<<<<<< HEAD
           cp requirements.txt ./publish/
           cp -r templates/ ./publish/
           cp -r static/ ./publish/
           cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
+=======
+          cp requirement.txt ./publish/
+          cp -r templates/ ./publish/
+          cp -r static/ ./publish/
+          # cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
+>>>>>>> 926fa76c99e81a14fe1ad50ded3009d190753e9b
           # ... tambahkan file/folder lain yang dibutuhkan App Service Anda
 
       - name: Upload Application Artifact
