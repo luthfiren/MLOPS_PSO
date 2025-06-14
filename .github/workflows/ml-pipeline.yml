@@ -59,7 +59,7 @@ jobs:
           cp -r templates/ ./publish/
           cp -r static/ ./publish/
           # Salin model yang sudah dilatih (asumsi 'trained_model.pkl' dibuat oleh 'modelling.py')
-          cp trained_model.pkl ./publish/
+          cp -r model/ ./publish/
 
           # Kompres seluruh isi direktori 'publish' menjadi satu file .zip
           # Masuk ke direktori 'publish' terlebih dahulu agar isi zip berada langsung di root-nya.
