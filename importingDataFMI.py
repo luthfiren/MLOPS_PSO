@@ -47,35 +47,15 @@ def get_finland_country_level_weather_debug(start_time_str, end_time_str, params
             "timestep=60", # 60 minutes for observations
             "timeseries=True" # Forces station_name/ID as top-level key
         ]
-
-        print(f"\n--- API Request Details ---")
-        print(f"Stored Query ID: {stored_query_id}")
-        print(f"Request Arguments: {request_args}")
-        print(f"Fetching data from {start_time_str} to {end_time_str}...") # Print strings
         
         # Suppress the specific UserWarning regarding invalid bbox if it still appears
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning) 
             obs_data = download_stored_query(stored_query_id, args=request_args)
 
-        print(f"\n--- FMI Response Status ---")
         if not obs_data.data:
-            print("OBSERVATIONS ARE EMPTY: obs_data.data is empty.")
+            logging.warning("OBSERVATIONS ARE EMPTY: obs_data.data is empty.")
             return pd.DataFrame()
-        else:
-            print(f"Observations received. Top-level keys: {list(obs_data.data.keys())[:5]} (showing first 5)")
-            print(f"Number of stations with data: {len(obs_data.data)}")
-            if obs_data.data:
-                first_station_id = list(obs_data.data.keys())[0]
-                print(f"Example data for station '{first_station_id}':")
-                if 'times' in obs_data.data[first_station_id]:
-                    print(f"  Times available: {len(obs_data.data[first_station_id]['times'])}")
-                for param in params_to_fetch:
-                    if param in obs_data.data[first_station_id] and 'values' in obs_data.data[first_station_id][param]:
-                        print(f"  '{param}' values count: {len(obs_data.data[first_station_id][param]['values'])}")
-                    else:
-                        print(f"  '{param}' not found or no values for {first_station_id}.")
-
 
         # --- Adjusted Data Extraction ---
         for station_id, station_details in obs_data.data.items():
@@ -102,7 +82,7 @@ def get_finland_country_level_weather_debug(start_time_str, end_time_str, params
                 all_stations_data.append(row)
 
         if not all_stations_data:
-            print("No observations extracted from the downloaded data after parsing.")
+            logging.warning("No observations extracted after parsing.")
             return pd.DataFrame()
 
         df = pd.DataFrame(all_stations_data)
@@ -110,11 +90,10 @@ def get_finland_country_level_weather_debug(start_time_str, end_time_str, params
         df = df.set_index(['Time (UTC)', 'Station ID']).sort_index()
 
         # Aggregate data
-        print("\nAggregating data for country-level representation...")
         actual_params_in_df = [p for p in params_to_fetch if p in df.columns]
         
         if not actual_params_in_df:
-            print("No requested parameters found in the downloaded data for aggregation.")
+            logging.warning("Requested parameters not found in data for aggregation.")
             return pd.DataFrame()
 
         country_level_df = df.groupby('Time (UTC)')[actual_params_in_df].mean()
@@ -126,11 +105,11 @@ def get_finland_country_level_weather_debug(start_time_str, end_time_str, params
                 country_level_df[f'{param} (Mean)'] = df.groupby('Time (UTC)')[param].mean()
                 country_level_df[f'{param} (Median)'] = df.groupby('Time (UTC)')[param].median()
 
-        print(f"Data collected from {len(df.index.get_level_values('Station ID').unique())} stations.")
+        logging.info(f"Aggregated data collected from {len(df.index.get_level_values('Station ID').unique())} stations.")
         return country_level_df.reset_index()
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.error(f"Error in get_finland_country_level_weather_debug: {e}")
         return pd.DataFrame()
 
 # # --- Main execution block ---
@@ -237,11 +216,11 @@ def load_last_ingestion_time(json_file):
                 if last_ingestion_str:
                     return dt.datetime.fromisoformat(last_ingestion_str.replace("Z", "+00:00")).replace(tzinfo=None)
                 else:
-                    print("⚠ 'last_ingestion_time' not found, defaulting to utcnow()")
+                    logging.warning("'last_ingestion_time' not found, defaulting to utcnow()")
         except Exception as e:
-            print(f"⚠ Error reading JSON: {e}")
+            logging.warning(f"Error reading JSON '{json_file}': {e}")
     else:
-        print(f"⚠ {json_file} not found. Using utcnow().")
+        logging.warning(f"File '{json_file}' not found. Using utcnow().")
     return dt.datetime.utcnow()
 
 def append_new_data(csv_filename, new_data):
@@ -249,12 +228,12 @@ def append_new_data(csv_filename, new_data):
         existing_df = pd.read_csv(csv_filename, sep=';')
         new_data = new_data[~new_data['Time (UTC)'].isin(existing_df['Time (UTC)'])]
         if new_data.empty:
-            print("⚠ No new data to append (all timestamps already exist).")
+            logging.info("No new data to append (all timestamps already exist).")
             return
         new_data.to_csv(csv_filename, mode='a', index=False, header=False, sep=';')
     else:
         new_data.to_csv(csv_filename, index=False, sep=';')
-    print(f"✔ Appended {len(new_data)} new rows.")
+    logging.info(f"Appended {len(new_data)} new rows to '{csv_filename}'.")
 
 def finalize_csv(csv_filename):
     try:
@@ -262,9 +241,9 @@ def finalize_csv(csv_filename):
         df['Time (UTC)'] = pd.to_datetime(df['Time (UTC)'])
         df = df.sort_values(by='Time (UTC)', ascending=False).drop_duplicates(subset='Time (UTC)').reset_index(drop=True)
         df.to_csv(csv_filename, index=False, sep=';')
-        print(f"✔ Sorted & deduplicated data saved to '{csv_filename}'.")
+        logging.info(f"Sorted & deduplicated data saved to '{csv_filename}'.")
     except Exception as e:
-        print(f"❌ Error finalizing CSV: {e}")
+        logging.error(f"Error finalizing CSV '{csv_filename}': {e}")
 
 if __name__ == "__main__":
       
@@ -289,7 +268,6 @@ if __name__ == "__main__":
     end_time_naive_utc = load_last_ingestion_time(json_filename)
     start_time_naive_utc = end_time_naive_utc - dt.timedelta(hours=total_hours_to_crawl)
 
-    print(f"⏳ Starting crawl: {start_time_naive_utc} to {end_time_naive_utc} ({total_hours_to_crawl} hrs)")
     logging.info(f"Starting ingestion for file FMI {start_time_naive_utc.isoformat()}Z → {end_time_naive_utc.isoformat()}Z")
     
     # ── Main Loop ──────────────────────────────────────────    
@@ -300,7 +278,6 @@ if __name__ == "__main__":
 
         start_str = round_start_time.isoformat(timespec="seconds") + "Z"
         end_str = round_end_time.isoformat(timespec="seconds") + "Z"
-        print(f"\n📡 Fetching: {start_str} → {end_str} ({hours_this_round} hrs)")
 
         desired_params = [
             "Air temperature", "Precipitation amount", "Wind speed",
@@ -315,9 +292,9 @@ if __name__ == "__main__":
             try:
                 append_new_data(csv_filename, weather_data)
             except Exception as e:
-                print(f"❌ Error appending data: {e}")
+                logging.error(f"❌ Error appending data: {e}")
         else:
-            print("⚠ No data retrieved.")
+            logging.info("⚠ No data retrieved.")
 
         # Progress update
         start_time_naive_utc = round_end_time
