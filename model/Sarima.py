@@ -1,153 +1,170 @@
-import numpy as np
+# model/Sarima.py
+import logging
+from pathlib import Path
 import pandas as pd
-import matplotlib.pyplot as plt
-from statsmodels.tsa.stattools import adfuller
+import numpy as np
+import json
+import time
+import joblib
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from logging.handlers import RotatingFileHandler
 
-# MODEL SARIMA
-# =============================
-# FUNGSI PREPROCESSING
-# =============================
-def load_data(file_path):
-    """Memuat data dari CSV dan mengatur timestamp sebagai index."""
-    df = pd.read_csv(file_path)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df.set_index("timestamp", inplace=True)
-    return df
+class SarimaModel:
+    def __init__(self, order=(1,1,1), seasonal_order=(1,1,1,24), freq='h', forecast_horizon=24):
+        # Validasi frekuensi
+        supported_freq = ['h', 'd', 'w', 'm']
+        if freq not in supported_freq:
+            raise ValueError(f"Unsupported frequency '{freq}'. Supported: {supported_freq}")
+        
+        # Parameter model
+        self.order = order
+        self.seasonal_order = seasonal_order
+        self.freq = freq
+        self.forecast_horizon = forecast_horizon
+        self.model_name = 'SarimaModel'
+        self.n_jobs = 1  # SARIMAX tidak mendukung parallel processing
+        
+        # Setup logging
+        self.logger = self._setup_logger()
+        
+        # Path file
+        self.model_dir = Path(__file__).parent
+        self.log_file = self.model_dir / "training.log"
+        self.champion_score_file = self.model_dir / "champion_score.txt"
+        self.champion_config_file = self.model_dir / "champion_config.json"
+        self.model_file = self.model_dir / f"{self.model_name}_champion.joblib"
+        
+        # Inisialisasi model
+        self.model = None
+        
+        # Simpan parameter
+        self.params = {
+            "order": list(self.order),
+            "seasonal_order": list(self.seasonal_order),
+            "frequency": self.freq,
+            "forecast_horizon": self.forecast_horizon
+        }
 
-def add_time_features(df, target_col):
-    """Menambahkan fitur berbasis waktu (jam, hari, musim)."""
-    df["hour"] = df.index.hour
-    df["day_of_week"] = df.index.dayofweek
-    df["month"] = df.index.month
-    df["season"] = df["month"] % 12 // 3 + 1  # 1=Winter, 2=Spring, 3=Summer, 4=Autumn
-    return df
+    def _setup_logger(self):
+        """Setup rotating logger sesuai Theta.py"""
+        log_path = self.log_file
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        logger = logging.getLogger(self.model_name)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        if not logger.handlers:
+            handler = RotatingFileHandler(log_path, maxBytes=5*1024*1024, backupCount=3)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+        return logger
 
-def check_stationarity(series):
-    """Menguji apakah data stationer menggunakan ADF Test."""
-    result = adfuller(series)
-    print(f'ADF Statistic: {result[0]}')
-    print(f'p-value: {result[1]}')
-    return result[1] < 0.05
+    def train_with_fold(self, folds, optimization=False):
+        """Latih model dengan cross-validation"""
+        start_time = time.time()
+        scores = []
+        
+        for i, (train_df, test_df) in enumerate(folds):
+            # Reset index untuk memastikan datetime sebagai kolom
+            train_data = train_df.reset_index(drop=True)
+            test_data = test_df.reset_index(drop=True)
+            
+            # Validasi kolom target
+            if 'y' not in train_data.columns:
+                raise ValueError("DataFrame harus memiliki kolom 'y'")
+            
+            # Latih model
+            self.model = SARIMAX(train_data['y'], 
+                                 order=self.order, 
+                                 seasonal_order=self.seasonal_order)
+            results = self.model.fit(disp=False)
+            
+            # Prediksi
+            forecast = results.get_forecast(steps=len(test_data))
+            pred_mean = forecast.predicted_mean
+            
+            # Evaluasi
+            score = mean_absolute_error(test_data['y'], pred_mean)
+            scores.append(score)
+        
+        avg_score = np.mean(scores)
+        elapsed_time = time.time() - start_time
+        
+        if not optimization:
+            self.logger.info(f"{self.model_name} Average MAE across folds = {avg_score:.4f}, Training Time = {elapsed_time:.2f}s")
+        
+        return avg_score
 
-def apply_differencing(series, d=1, D=0, seasonal_period=24):
-    """Melakukan differencing non-musiman dan musiman."""
-    if d > 0:
-        series = series.diff(d).dropna()
-    if D > 0:
-        series = series.diff(seasonal_period * D).dropna()
-    return series
+    def predict(self, pred_df):
+        """Hasilkan prediksi"""
+        if self.model is None:
+            raise ValueError("Model belum dilatih. Panggil metode fit() terlebih dahulu.")
+        
+        # Validasi kolom 'ds'
+        if 'ds' not in pred_df.columns:
+            raise ValueError("Input dataframe harus memiliki kolom 'ds'")
+        
+        # Reset index dan validasi target
+        pred_data = pred_df.reset_index(drop=True)
+        if 'y' not in pred_data.columns:
+            pred_data['y'] = np.nan  # Kolom dummy untuk kompatibilitas
+        
+        # Prediksi
+        forecast = self.model.get_forecast(steps=len(pred_data))
+        pred_mean = forecast.predicted_mean
+        pred_ci = forecast.conf_int()
+        
+        # Format hasil
+        result = pred_data[['ds']].copy()
+        result['yhat'] = pred_mean
+        result['lower_bound'] = pred_ci.iloc[:, 0]
+        result['upper_bound'] = pred_ci.iloc[:, 1]
+        
+        return result
 
-# =============================
-# FUNGSI MODELING
-# =============================
-def identify_parameters(series, seasonal_period=24, plot=False):
-    """Mengidentifikasi parameter SARIMA berdasarkan ACF/PACF."""
-    if plot:
-        plot_acf(series, lags=40)
-        plot_pacf(series, lags=40)
-        plt.show()
-    
-    # Contoh parameter default (sesuaikan dengan analisis)
-    return (2,1,1), (1,1,1,seasonal_period)
+    def evaluate(self, actual_df, forecast_df):
+        """Evaluasi model dengan MAE dan RMSE"""
+        merged = pd.merge(actual_df, forecast_df[['ds', 'yhat']], on='ds', how='inner')
+        mae = mean_absolute_error(merged['y'], merged['yhat'])
+        rmse = np.sqrt(mean_squared_error(merged['y'], merged['yhat']))
+        return mae, rmse
 
-def train_sarima_model(train_data, order, seasonal_order):
-    """Melatih model SARIMA."""
-    model = SARIMAX(train_data, order=order, seasonal_order=seasonal_order)
-    results = model.fit(disp=False)
-    return results
+    def save(self, model_path=None, config_path=None, score_path=None, score=None):
+        """Simpan model dan konfigurasi"""
+        model_path = model_path or self.model_file
+        config_path = config_path or self.champion_config_file
+        
+        # Simpan model
+        joblib.dump(self, model_path)
+        
+        # Simpan konfigurasi
+        with open(config_path, 'w') as f:
+            json.dump(self.params, f, indent=4)
+        
+        # Simpan skor
+        if score is not None:
+            with open(score_path or self.champion_score_file, 'w') as f:
+                f.write(str(score))
+        
+        self.logger.info(f"Model disimpan di {model_path}")
 
-def forecast_sarima(model, steps):
-    """Melakukan prediksi menggunakan model SARIMA."""
-    forecast = model.get_forecast(steps=steps)
-    pred_mean = forecast.predicted_mean
-    pred_ci = forecast.conf_int()
-    return pred_mean, pred_ci
-
-# =============================
-# FUNGSI EVALUASI
-# =============================
-def generate_time_series_folds(df, date_col, n_splits, horizon):
-    df = df.sort_values(by=date_col)
-    fold_size = len(df) // (n_splits + 1)
-    folds = []
-
-    for i in range(n_splits):
-        train = df.iloc[:fold_size * (i + 1)]
-        test = df.iloc[fold_size * (i + 1): fold_size * (i + 1) + horizon]
-        folds.append((train, test))
-
-    return folds
-
-def evaluate_forecast(y_true, y_pred):
-    """Menghitung metrik evaluasi (MAE, RMSE)."""
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-    print(f"MAE: {mae:.4f}, RMSE: {rmse:.4f}")
-    return mae, rmse
-
-def plot_forecast(y_train, y_true, y_pred, pred_ci=None):
-    """Memvisualisasikan hasil forecasting."""
-    plt.figure(figsize=(12,6))
-    plt.plot(y_train[-100:], label="Train")
-    plt.plot(y_true, label="Actual")
-    plt.plot(y_pred, label="Forecast", color="red")
-    if pred_ci is not None:
-        plt.fill_between(pred_ci.index, pred_ci.iloc[:,0], pred_ci.iloc[:,1], color='k', alpha=.2)
-    plt.legend()
-    plt.show()
-
-# =============================
-# FUNGSI UTAMA (PIPELINE)
-# =============================
-def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", seasonal_period=24):
-    """Pipeline lengkap SARIMA dari data hingga evaluasi."""
-    # 1. Load Data
-    train_df = load_data(train_path)
-    val_df = load_data(val_path)
-    test_df = load_data(test_path)
-    
-    # 2. Tambahkan fitur waktu
-    train_df = add_time_features(train_df, target_col)
-    val_df = add_time_features(val_df, target_col)
-    test_df = add_time_features(test_df, target_col)
-    
-    # 3. Gabungkan data
-    full_df = pd.concat([train_df, val_df, test_df])
-    
-    # 4. Cek stationeritas
-    series = full_df[target_col]
-    is_stationary = check_stationarity(series)
-    if not is_stationary:
-        series = apply_differencing(series, d=1, D=1, seasonal_period=seasonal_period)
-    
-    # 5. Split kembali ke train/val/test
-    train_data = series.loc[train_df.index]
-    val_data = series.loc[val_df.index]
-    test_data = series.loc[test_df.index]
-    
-    # 6. Identifikasi parameter
-    order, seasonal_order = identify_parameters(series, seasonal_period)
-    
-    # 7. Train model
-    model = train_sarima_model(train_data, order, seasonal_order)
-    
-    # 8. Validasi
-    val_pred, _ = forecast_sarima(model, len(val_data))
-    print("Validation Metrics:")
-    evaluate_forecast(val_data, val_pred)
-    plot_forecast(train_data, val_data, val_pred)
-    
-    # 9. Retrain dengan full data
-    full_data = pd.concat([train_data, val_data])
-    final_model = train_sarima_model(full_data, order, seasonal_order)
-    
-    # 10. Test
-    test_pred, test_ci = forecast_sarima(final_model, len(test_data))
-    print("Test Metrics:")
-    evaluate_forecast(test_data, test_pred)
-    plot_forecast(full_data, test_data, test_pred, test_ci)
-    
-    return final_model
+    def create_folds(self, df, n_splits, test_size):
+        """Buat time series folds"""
+        folds = []
+        total_points = len(df)
+        step = (total_points - test_size * n_splits) // n_splits
+        
+        for i in range(n_splits):
+            train_end = step * (i + 1) + test_size * i
+            test_start = train_end
+            test_end = test_start + test_size
+            
+            if test_end > total_points:
+                break
+            
+            train_df = df.iloc[:train_end]
+            test_df = df.iloc[test_start:test_end]
+            folds.append((train_df, test_df))
+        
+        return folds

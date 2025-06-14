@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/0/1976252e1b764831822c008d37e35cfb/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 1976252e1b764831822c008d37e35cfb
+run_name: funny-zebra-268
+run_uuid: 1976252e1b764831822c008d37e35cfb
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1749906356182
+status: 1
+tags: []
+user_id: Iki laptop
