@@ -50,7 +50,7 @@ def load_and_merge_data(folder):
         df_fingrid, df_fmi = detect_and_load_csvs(folder)
 
         df_fingrid["timestamp"] = pd.to_datetime(df_fingrid["endTime"], errors="coerce").dt.tz_localize(None)
-        df_fmi["timestamp"] = pd.to_datetime(df_fmi["Time (UTC)"], errors="coerce")
+        df_fmi["timestamp"] = pd.to_datetime(df_fmi["Time (UTC)"], errors="coerce").dt.tz_localize(None)
 
         df = pd.merge(df_fingrid, df_fmi, on="timestamp", how="inner")
         df.drop_duplicates(subset=["timestamp"], keep="first", inplace=True)
@@ -170,23 +170,23 @@ def feature_engineering(df):
         logging.error(f"Error in feature_engineering: {e}")
         raise
 
-def split_and_save(df, output_dir):
-    try:
-        os.makedirs(output_dir, exist_ok=True)
-        train_size = int(len(df) * 0.7)
-        val_size = int(len(df) * 0.15)
+# def split_and_save(df, output_dir):
+#     try:
+#         os.makedirs(output_dir, exist_ok=True)
+#         train_size = int(len(df) * 0.7)
+#         val_size = int(len(df) * 0.15)
 
-        train_df = df.iloc[:train_size].reset_index(drop=True)
-        val_df = df.iloc[train_size:train_size+val_size].reset_index(drop=True)
-        test_df = df.iloc[train_size+val_size:].reset_index(drop=True)
+#         train_df = df.iloc[:train_size].reset_index(drop=True)
+#         val_df = df.iloc[train_size:train_size+val_size].reset_index(drop=True)
+#         test_df = df.iloc[train_size+val_size:].reset_index(drop=True)
 
-        train_df.to_csv(os.path.join(output_dir, "train.csv"), index=False)
-        val_df.to_csv(os.path.join(output_dir, "val.csv"), index=False)
-        test_df.to_csv(os.path.join(output_dir, "test.csv"), index=False)
+#         train_df.to_csv(os.path.join(output_dir, "train.csv"), index=False)
+#         val_df.to_csv(os.path.join(output_dir, "val.csv"), index=False)
+#         test_df.to_csv(os.path.join(output_dir, "test.csv"), index=False)
 
-        logging.info("Data successfully split and saved.")
-    except Exception as e:
-        logging.error(f"Error during split_and_save: {e}")
+#         logging.info("Data successfully split and saved.")
+#     except Exception as e:
+#         logging.error(f"Error during split_and_save: {e}")
 
 if __name__ == "__main__":
     # Ini inputnya file-file di folder fileExtracted dan menghasilkan file di folder processed_data
