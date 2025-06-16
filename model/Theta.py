@@ -57,13 +57,13 @@ class ThetaModel:
 
         logger = logging.getLogger(self.model_name)
         logger.setLevel(logging.INFO)
-        logger.propagate = False
-
+        # Ensure only one handler is added to avoid duplicate logs
         if not logger.handlers:
             handler = RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024, backupCount=3, mode='a')
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
             logger.addHandler(handler)
+        logger.propagate = False
 
         return logger
 
@@ -97,7 +97,7 @@ class ThetaModel:
         if "ds" not in pred_df.columns:
             raise ValueError("Input dataframe must contain a 'ds' column.")
         
-        # Ensure 'ds' column is datetime and naive for consistency
+        # Ensure 'ds' column is datetime and naive for both
         pred_df['ds'] = pd.to_datetime(pred_df['ds']).dt.tz_localize(None)
 
         forecast = self.model.predict(h=len(pred_df))
@@ -188,20 +188,21 @@ class ThetaModel:
         folds = self.create_folds(df, n_splits=3, test_size=self.forecast_horizon)
         if not folds:
             self.logger.warning("Not enough data to create folds for optimization.")
-            return float('inf'), None, None # Return error values
+            return float('inf'), None, None, None # Return error values
 
         best_score = float('inf')
         best_params_found = None
         best_model_obj = None # To store the ThetaModel instance
+        best_model_run_id = None # To store the run_id where the best model was logged
 
         # --- MLflow Outer Run for this optimization process ---
-        with mlflow.start_run(run_name=f"Theta_Optimization_Horizon_{forecast_horizon}"):
+        with mlflow.start_run(run_name=f"Theta_Optimization_Horizon_{forecast_horizon}") as outer_run:
             mlflow.log_param("optimizer_method", "GridSearch")
             mlflow.log_param("optimization_folds", len(folds))
 
             for i, params in enumerate(param_grid):
                 # --- MLflow Nested Run for each parameter combination ---
-                with mlflow.start_run(nested=True, run_name=f"Theta_Param_Combo_{i}"):
+                with mlflow.start_run(nested=True, run_name=f"Theta_Param_Combo_{i}") as nested_run:
                     current_model_params = {
                         "season_length": params["season_length"],
                         "freq": self.freq, # Use self.freq for consistency
@@ -223,6 +224,8 @@ class ThetaModel:
                             best_score = score
                             best_params_found = current_model_params # Simpan parameter lengkap
                             best_model_obj = candidate_model # Simpan instance model terbaik
+                            # Capture the run_id of this nested run, which holds the best model artifact
+                            best_model_run_id = nested_run.info.run_id
 
                     except Exception as e:
                         self.logger.warning(f"Skipping Theta params {current_model_params} due to error: {e}")
@@ -235,40 +238,78 @@ class ThetaModel:
                 # Log the best overall parameters for this optimization run
                 mlflow.log_param("best_params_found", json.dumps(best_params_found))
                 mlflow.log_metric("best_validation_mae", best_score)
+                mlflow.set_tag("best_model_type", "ThetaModel") # Add tag for traceability
                 
                 # Simpan model terbaik ke dalam MLflow Artifacts
                 # Karena StatsForecast bukan native flavor, kita bisa log sebagai pyfunc
+                # Pastikan best_model_obj.model adalah objek StatsForecast yang sudah fit
+                # Kita akan log model StatsForecast object langsung.
+                # Kita butuh class wrapper agar bisa di-log sebagai pyfunc
+                # Jika Anda tidak punya, Anda bisa log joblib file lalu muat itu di wrapper
+                
+                # Option 1: Log the StatsForecast object directly via a custom pyfunc wrapper
                 mlflow.pyfunc.log_model(
                     artifact_path="champion_theta_model",
-                    python_model=ThetaModelPyfuncWrapper(best_model_obj), # Wrapper kustom
-                    artifacts={"model_joblib": str(best_model_obj.model_file)} # Simpan file joblib juga jika perlu
+                    python_model=ThetaModelPyfuncWrapper(best_model_obj.model, best_model_obj.freq), # Pass the fitted StatsForecast object and its frequency
+                    # Ensure the wrapper takes and uses these correctly
                 )
-                self.logger.info(f"Theta Champion model logged to MLflow artifacts (run_id: {mlflow.active_run().info.run_id}).")
+                self.logger.info(f"Theta Champion model logged to MLflow artifacts (run_id: {outer_run.info.run_id}).")
 
                 # Simpan champion ke joblib dan config lokal (opsional, tapi berguna untuk fallback)
-                best_model_obj.save(best_model_obj.model_file) # Save ke path yang sudah didefinisikan
+                best_model_obj.save(best_model_obj.model_file)
                 with open(best_model_obj.champion_config_file, 'w') as f:
                     json.dump(best_params_found, f, indent=4)
                 self.logger.info(f"Theta Champion model and config saved locally.")
 
+                return best_score, best_params_found, best_model_obj, outer_run.info.run_id # Return run_id
             else:
                 self.logger.warning("No improved Theta model found during optimization.")
-            
-        return best_score, best_params_found, best_model_obj # Kembalikan informasi model terbaik
+                return float('inf'), None, None, outer_run.info.run_id # Return sentinel values
 
-# Custom Pyfunc wrapper untuk StatsForecast (jika diperlukan untuk MLflow)
-# Ini diperlukan karena mlflow.statsforecast tidak ada built-in seperti sklearn
+# Custom Pyfunc wrapper untuk StatsForecast
 class ThetaModelPyfuncWrapper(mlflow.pyfunc.PythonModel):
-    def __init__(self, model_instance):
-        self.model_instance = model_instance # Menerima instance ThetaModel
+    def __init__(self, statsforecast_model, freq):
+        self.statsforecast_model = statsforecast_model
+        self.freq = freq
     
     def load_context(self, context):
-        # Jika Anda menyimpan joblib terpisah, muat di sini
-        # self.model_instance.model = joblib.load(context.artifacts["model_joblib"])
-        pass # Model_instance sudah ada dari __init__
+        # Jika model dilog sebagai file joblib, muat di sini.
+        # Jika model StatsForecast langsung dilog, objeknya sudah di self.statsforecast_model
+        pass
 
     def predict(self, context, model_input: pd.DataFrame):
-        # Asumsikan model_input adalah DataFrame dengan kolom 'ds' dan 'unique_id'
-        # sesuaikan dengan format yang dibutuhkan method predict() dari ThetaModel
-        forecast_df = self.model_instance.predict(model_input)
-        return forecast_df.rename(columns={'yhat': 'predicted_value'}) # Ubah nama kolom output standar
+        # model_input diharapkan memiliki kolom 'ds' (datetime) dan 'unique_id'
+        # ThetaModel expects 'unique_id' and 'ds' (datetime)
+        
+        # Ensure 'ds' column is datetime and naive for prediction
+        model_input['ds'] = pd.to_datetime(model_input['ds']).dt.tz_localize(None)
+
+        # Ensure 'unique_id' is present as it's required by StatsForecast
+        if 'unique_id' not in model_input.columns:
+            model_input['unique_id'] = 'series_1' # Default to 'series_1' if not provided
+
+        # The 'h' parameter for predict is determined by the length of the input DataFrame
+        h = len(model_input)
+        
+        # StatsForecast predict method requires the last 'n_windows' of train_df
+        # If the model input is just future dates, it needs the last historical points
+        # This is where Pyfunc wrapper for time series can get tricky.
+        # A common pattern is to save the last few points of training data *with* the model
+        # or have the 'predict' method assume 'model_input' includes the necessary historical context.
+
+        # For this simple wrapper, we assume model_input is just future dates and predict h steps
+        # This will predict from the *end of the training data the model was last fitted on*.
+        # To make it truly robust for real-time inference, the model should be retrained
+        # with latest data, or the predict method should accept recent history.
+        forecast_df = self.statsforecast_model.predict(h=h)
+        
+        # Ensure 'ds' column is datetime and naive
+        forecast_df['ds'] = pd.to_datetime(forecast_df['ds']).dt.tz_localize(None)
+
+        # Rename the output column to 'predicted_value' for consistency
+        # And ensure 'unique_id' if needed
+        forecast_df = forecast_df.rename(columns={'Theta': 'predicted_value'})
+        if 'unique_id' not in forecast_df.columns and 'unique_id' in model_input.columns:
+             forecast_df['unique_id'] = model_input['unique_id'].iloc[0]
+
+        return forecast_df

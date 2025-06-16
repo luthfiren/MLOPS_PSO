@@ -13,7 +13,7 @@ from sklearn.metrics import mean_absolute_error
 from pathlib import Path
 
 # -- MLflow Specific Imports --
-import mlflow.statsmodels # Jika Anda ingin menyimpan model statsmodels secara native
+import mlflow.statsmodels # Untuk melog model statsmodels secara native
 import mlflow.pyfunc # Untuk wrapper universal jika diperlukan
 
 MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,21 +42,21 @@ class ExponentialSmoothingModel:
             "trend_type": trend_type
         }
 
-
     def _setup_logger(self):
         log_path = Path(__file__).parent / "training.log"
         logger = logging.getLogger(self.model_name)
-        handler = logging.FileHandler(log_path, mode='a')
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(message)s')
-        handler.setFormatter(formatter)
+        # Ensure only one handler is added to avoid duplicate logs
         if not logger.handlers:
+            handler = logging.FileHandler(log_path, mode='a')
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(message)s')
+            handler.setFormatter(formatter)
             logger.addHandler(handler)
         logger.setLevel(logging.INFO)
+        # Prevent propagation to root logger to avoid duplicate console output if root logger is configured
+        logger.propagate = False
         return logger
  
     def train_with_fold(self, folds, optimizing=False):
-        # self.folds_to_train = folds # Ini perlu ada di optimize(), bukan di sini
-        
         start_time = time.time()
         scores = []
         model_smoothing_name = None
@@ -70,12 +70,14 @@ class ExponentialSmoothingModel:
                 model = SimpleExpSmoothing(train_series).fit(optimized=True)
                 model_smoothing_name = 'SimpleExpSmoothing'
             elif self.has_trend and (self.seasonal_periods is None or self.seasonal_periods == 0): # Holt
+                # Holt can have 'add' or 'mul' trend, but statsmodels Holt class directly uses 'exponential' param
+                # if trend_type is 'mul', set exponential=True, else False
                 model = Holt(train_series, damped_trend=self.damped_trend, exponential=self.trend_type == 'mul').fit(optimized=True)
                 model_smoothing_name = "Holt"
             elif self.seasonal_periods: # ExponentialSmoothing (Holt-Winters)
                 model = ExponentialSmoothing(
                     train_series, 
-                    trend=self.trend_type, # Use self.trend_type directly
+                    trend=self.trend_type, # Use self.trend_type directly ('add' or None)
                     seasonal=self.seasonal_type, 
                     seasonal_periods=self.seasonal_periods,
                     damped_trend=self.damped_trend
@@ -104,34 +106,39 @@ class ExponentialSmoothingModel:
         return avg_score # Return the average MAE
 
     def predict(self, pred_df: pd.DataFrame):
-        # Asumsikan pred_df berisi index waktu untuk prediksi
-        # Dan self.model sudah terlatih
         if self.model is None:
             raise RuntimeError("Model has not been trained yet.")
         
-        # Untuk ExponentialSmoothing, prediksi dilakukan dari series yang sudah dilatih
-        # Anda perlu memastikan model terakhir yang dilatih di train_with_fold atau optimize adalah yang digunakan
+        # Ensure 'ds' column is present and is datetime-like
+        if 'ds' not in pred_df.columns:
+            raise ValueError("Input DataFrame for predict must contain a 'ds' column.")
         
-        # NOTE: Holt-Winters/ETS models predict `h` steps from the end of the *training* data.
-        # So, pred_df here should ideally just represent the future time points.
-        # If pred_df contains actuals to align, we need to handle that.
+        # Sort by 'ds' to ensure correct time order for forecasting
+        pred_df = pred_df.sort_values(by='ds').reset_index(drop=True)
         
-        # For simplicity, assuming pred_df's length determines forecast horizon
-        h = len(pred_df)
+        h = len(pred_df) # Forecast horizon is determined by the length of pred_df
         forecast_values = self.model.forecast(steps=h)
 
-        # Buat DataFrame hasil prediksi dengan index dari pred_df
+        # Create DataFrame for results, using 'ds' from pred_df
         forecast_df = pd.DataFrame({
-            'ds': pred_df['ds'], # Asumsi 'ds' ada di pred_df
+            'ds': pred_df['ds'],
             'yhat': forecast_values
         })
         
+        # Ensure unique_id if needed, assuming single series for ES for simplicity
+        if 'unique_id' in pred_df.columns and 'unique_id' not in forecast_df.columns:
+            forecast_df['unique_id'] = pred_df['unique_id'].iloc[0]
+            
         return forecast_df
+
 
     def evaluate(self, actual_df: pd.DataFrame, forecast_df: pd.DataFrame) -> float:
         # Menyatukan dataframe berdasarkan 'ds' (timestamp)
-        actual_df_clean = actual_df.loc[actual_df['ds'].isin(forecast_df['ds']), ['ds', 'y']].copy()
-        merged = pd.merge(actual_df_clean, forecast_df, on="ds", how="inner")
+        # Ensure 'ds' is datetime for both and timezone-naive for consistent merging
+        actual_df['ds'] = pd.to_datetime(actual_df['ds']).dt.tz_localize(None)
+        forecast_df['ds'] = pd.to_datetime(forecast_df['ds']).dt.tz_localize(None)
+
+        merged = pd.merge(actual_df[['ds', 'y']], forecast_df[['ds', 'yhat']], on="ds", how="inner")
         
         if merged.empty:
             raise ValueError("No matching timestamps between actual and forecast data during evaluation.")
@@ -178,14 +185,18 @@ class ExponentialSmoothingModel:
             "forecast_horizon": [forecast_horizon] # Always include horizon
         }
         
+        # Ensure df has 'y' and 'ds' columns for folds creation
+        if 'y' not in df.columns or 'ds' not in df.columns:
+            raise ValueError("Input DataFrame for optimize must contain 'y' and 'ds' columns.")
+
         if self.has_trend and self.seasonal_periods: # Holt-Winters (with trend & seasonality)
             param_grid_dict["seasonal_periods"] = season_list if season_list else [self.seasonal_periods]
             param_grid_dict["seasonal_type"] = [None, "add", "mul"]
             param_grid_dict["damped_trend"] = [True, False]
-            param_grid_dict["trend_type"] = [None, "add"]
+            param_grid_dict["trend_type"] = ['add', 'mul'] # Both add and mul are valid for ExponentialSmoothing
         elif self.has_trend and not self.seasonal_periods: # Holt (with trend, no seasonality)
             param_grid_dict["damped_trend"] = [True, False]
-            param_grid_dict["trend_type"] = [None, "add"] # Holt can have 'add' or 'mul' trend, if not exponential
+            param_grid_dict["trend_type"] = ['add', 'mul'] # Holt can have 'add' or 'mul' trend
         elif not self.has_trend and self.seasonal_periods: # Pure Seasonal ES (no trend)
             param_grid_dict["seasonal_periods"] = season_list if season_list else [self.seasonal_periods]
             param_grid_dict["seasonal_type"] = [None, "add", "mul"]
@@ -198,15 +209,17 @@ class ExponentialSmoothingModel:
         best_model_obj = None # To store the ExponentialSmoothingModel instance
 
         # --- MLflow Outer Run for this optimization process ---
-        with mlflow.start_run(run_name=f"ES_Optimization_Horizon_{forecast_horizon}"):
+        # This run tracks the overall optimization attempt for ES model
+        with mlflow.start_run(run_name=f"ES_Optimization_Horizon_{forecast_horizon}") as outer_run:
             mlflow.log_param("optimizer_method", "GridSearch")
             mlflow.log_param("optimization_folds", len(self.folds_to_train))
             
             for i, params in enumerate(param_grid):
                 # --- MLflow Nested Run for each parameter combination ---
-                with mlflow.start_run(nested=True, run_name=f"ES_Param_Combo_{i}"):
+                # This run tracks a single ES model training with specific params
+                with mlflow.start_run(nested=True, run_name=f"ES_Param_Combo_{i}") as nested_run:
                     current_model_params = {
-                        "has_trend": self.has_trend,
+                        "has_trend": self.has_trend, # This is a fixed param from the instance init
                         "seasonal_periods": params.get("seasonal_periods", self.seasonal_periods),
                         "seasonal_type": params.get("seasonal_type", self.seasonal_type),
                         "forecast_horizon": params.get("forecast_horizon", forecast_horizon),
@@ -221,6 +234,7 @@ class ExponentialSmoothingModel:
                     try:
                         # Instantiate a new model with current parameters for training
                         candidate_model = ExponentialSmoothingModel(**current_model_params)
+                        # Pass the folds directly to train_with_fold
                         score = candidate_model.train_with_fold(self.folds_to_train, optimizing=True)
                         
                         mlflow.log_metric("validation_mae", score)
@@ -230,27 +244,34 @@ class ExponentialSmoothingModel:
                             best_score = score
                             best_params_found = current_model_params # Simpan parameter lengkap
                             best_model_obj = candidate_model # Simpan instance model terbaik
-
+                            # Capture the run_id of this nested run, which holds the best model artifact
+                            best_model_run_id = nested_run.info.run_id
+                            
                     except Exception as e:
                         self.logger.warning(f"Skipping ES params {current_model_params} due to error: {e}")
                         mlflow.log_param("status", "failed")
                         mlflow.log_param("error", str(e))
                         continue
 
-            # --- Setelah loop param_grid selesai ---
+            # --- Setelah loop param_grid selesai (kembali ke outer run) ---
             if best_model_obj:
                 # Log the best overall parameters for this optimization run
                 mlflow.log_param("best_params_found", json.dumps(best_params_found))
                 mlflow.log_metric("best_validation_mae", best_score)
+                mlflow.set_tag("best_model_type", "ExponentialSmoothing") # Add tag for traceability
                 
                 # Simpan model terbaik ke dalam MLflow Artifacts
                 # Ini akan disimpan di bawah run_id optimasi saat ini
+                # Pastikan candidate_model.model adalah objek statsmodels yang sudah di-fit
                 mlflow.statsmodels.log_model(
+                    statsmodels_model=best_model_obj.model, 
                     artifact_path="champion_es_model",
-                    flavor=mlflow.statsmodels,
-                    statsmodels_model=best_model_obj.model # Log the fitted statsmodels object
+                    # Refer to the original run where it was trained for better traceability
+                    # If you want to link to the run where it was *trained* (nested_run.info.run_id), 
+                    # you need to pass it here. For simplicity, we log it under the current (outer) run.
+                    # This model will later be registered to the MLflow Model Registry from modelling.py
                 )
-                self.logger.info(f"ES Champion model logged to MLflow artifacts (run_id: {mlflow.active_run().info.run_id}).")
+                self.logger.info(f"ES Champion model logged to MLflow artifacts (run_id: {outer_run.info.run_id}).")
 
                 # Simpan champion ke joblib dan config lokal (opsional, tapi berguna untuk fallback)
                 best_model_obj.save(CHAMPION_MODEL)
@@ -258,7 +279,7 @@ class ExponentialSmoothingModel:
                     json.dump(best_params_found, f, indent=4)
                 self.logger.info(f"ES Champion model and config saved locally.")
 
+                return best_score, best_params_found, best_model_obj, outer_run.info.run_id # Return the run_id
             else:
                 self.logger.warning("No improved ES model found during optimization.")
-            
-        return best_score, best_params_found, best_model_obj # Kembalikan informasi model terbaik
+                return float('inf'), None, None, outer_run.info.run_id # Return sentinel values

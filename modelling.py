@@ -4,55 +4,83 @@ import pandas as pd
 import json
 import os
 import mlflow
+import joblib # Untuk menyimpan model terbaik secara lokal
 from datetime import datetime
 
 # --- Import model-model dari folder 'model' ---
 from model.ExponentialSmoothing import ExponentialSmoothingModel
-from model.Theta import ThetaModel # Pastikan Theta.py memiliki kelas ThetaModel
-from model.Sarima import SarimaModel
+from model.Theta import ThetaModel 
 
 # --- FUNGSI UTAMA PREPROCESSING DATA ---
 # Ini fungsi yang akan menyiapkan data untuk training/evaluasi model
-def load_and_preprocess_data(train_path, val_path, test_path, target_col="value"):
-    # Memuat data dari CSV dan mengatur timestamp sebagai index
-    def load_df(file_path):
-        df = pd.read_csv(file_path)
-        df["ds"] = pd.to_datetime(df["timestamp"]) # Gunakan 'ds' untuk statsforecast
-        df = df.rename(columns={'value': 'y'}) # Gunakan 'y' untuk statsforecast
-        if 'unique_id' not in df.columns: # StatsForecast bisa single series dengan 'unique_id'
-             df['unique_id'] = 'series_1'
-        df = df[['unique_id', 'ds', 'y']].set_index(['unique_id', 'ds']) # Set MultiIndex
-        return df.reset_index() # Reset index agar 'ds' dan 'unique_id' jadi kolom biasa lagi
+def load_and_preprocess_data(master_data_path="data/master_electricity_prices.csv", target_col="value"):
+    df = pd.read_csv(master_data_path)
+    df["ds"] = pd.to_datetime(df["timestamp"]) # Sesuaikan dengan nama kolom timestamp Anda
+    df = df.rename(columns={target_col: 'y'}) # Gunakan 'y' untuk statsforecast/ES/Theta
+    
+    # Pastikan unique_id ada. StatsForecast/ExponentialSmoothing bisa single series dengan 'unique_id'
+    if 'unique_id' not in df.columns: 
+         df['unique_id'] = 'series_1'
+    
+    # Pastikan data terurut berdasarkan waktu
+    df = df.sort_values(by='ds').reset_index(drop=True)
 
-    train_df = load_df(train_path)
-    val_df = load_df(val_path)
-    test_df = load_df(test_path) # Data ini mungkin tidak memiliki 'y' jika ini data masa depan
+    # Lakukan split train, val, test dari master data ini
+    # Ini harus disesuaikan dengan strategi split time-series Anda
+    # Contoh sederhana:
+    total_len = len(df)
+    forecast_horizon = 24 # Contoh horizon yang akan diprediksi
+    val_len = forecast_horizon * 2 # Gunakan 2x horizon sebagai validasi
 
-    # Gabungkan semua data training/validasi untuk optimasi model
-    full_training_df = pd.concat([train_df, val_df], ignore_index=True)
-    full_training_df['ds'] = pd.to_datetime(full_training_df['ds']) # Pastikan datetime
+    # test_df akan menjadi data terakhir yang akan kita gunakan untuk prediksi 'masa depan'
+    # val_df akan menjadi data validasi untuk cross-validation
+    # train_df adalah sisanya untuk pelatihan
+    
+    test_df_for_prediction = df.iloc[-forecast_horizon:] # Data paling akhir untuk prediksi
+    val_df_for_evaluation = df.iloc[-(forecast_horizon + val_len):-forecast_horizon] # Data untuk validasi
+    train_df_for_training = df.iloc[:-(forecast_horizon + val_len)] # Data untuk pelatihan
 
-    return train_df, val_df, test_df, full_training_df
+    # full_training_df adalah data yang akan digunakan untuk melatih model terakhir sebelum prediksi
+    # Ini adalah train + val data
+    full_training_df = df.iloc[:-forecast_horizon]
+
+    return train_df_for_training, val_df_for_evaluation, test_df_for_prediction, full_training_df, df # Kembalikan juga df lengkap (master data)
 
 # --- FUNGSI UTAMA UNTUK MENYIMPAN OUTPUT (SESUAI DASHBOARD) ---
-def save_forecast_to_csv(forecast_df, actual_df_for_comparison, file_path="data/forecasts/latest_forecast.csv"):
+def save_forecast_to_csv(forecast_df: pd.DataFrame, master_actuals_df: pd.DataFrame, file_path="data/forecasts/latest_forecast.csv"):
     """
-    Menyimpan DataFrame hasil prediksi ke file CSV, termasuk data aktual untuk perbandingan.
+    Menyimpan DataFrame hasil prediksi ke file CSV, menggabungkannya dengan data aktual terbaru
+    dari master_actuals_df untuk periode yang sudah memiliki aktual.
     forecast_df harus memiliki kolom 'ds' dan 'yhat' (prediksi).
-    actual_df_for_comparison harus memiliki kolom 'ds' dan 'y' (aktual).
+    master_actuals_df harus memiliki kolom 'ds' dan 'y' (aktual).
     """
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     
-    # Rename 'y' to 'actual_price' and 'yhat' to 'predicted_price' for dashboard
+    # Gabungkan prediksi dengan data aktual yang paling mutakhir
+    # forecast_df memiliki 'ds', 'yhat'
+    # master_actuals_df memiliki 'ds', 'y'
+    
+    # Rename kolom untuk dashboard
+    forecast_df_renamed = forecast_df.rename(columns={'yhat': 'predicted_price', 'ds': 'tanggal_jam'})
+    master_actuals_df_renamed = master_actuals_df.rename(columns={'y': 'actual_price', 'ds': 'tanggal_jam'})
+
+    # Pastikan 'tanggal_jam' bertipe datetime untuk penggabungan
+    forecast_df_renamed['tanggal_jam'] = pd.to_datetime(forecast_df_renamed['tanggal_jam']).dt.tz_localize(None)
+    master_actuals_df_renamed['tanggal_jam'] = pd.to_datetime(master_actuals_df_renamed['tanggal_jam']).dt.tz_localize(None)
+
+    # Gabungkan berdasarkan kolom 'tanggal_jam'
+    # Ini akan memastikan untuk setiap 'tanggal_jam' yang ada di prediksi, jika ada aktualnya di master_actuals_df, akan digabungkan
     merged_df = pd.merge(
-        forecast_df.rename(columns={'yhat': 'predicted_price'}),
-        actual_df_for_comparison.rename(columns={'y': 'actual_price'}),
-        on='ds',
-        how='left'
+        forecast_df_renamed,
+        master_actuals_df_renamed[['tanggal_jam', 'actual_price']], # Hanya ambil ds dan actual_price
+        on='tanggal_jam',
+        how='left' # Gunakan left join agar semua prediksi tetap ada
     )
-    merged_df = merged_df[['ds', 'predicted_price', 'actual_price']].rename(columns={'ds': 'tanggal_jam'})
-    merged_df.to_csv(file_path, index=False)
-    print(f"Hasil prediksi dan aktual disimpan ke: {file_path}")
+    
+    # Pilih dan rename kolom untuk output akhir
+    final_output_df = merged_df[['tanggal_jam', 'predicted_price', 'actual_price']]
+    final_output_df.to_csv(file_path, index=False)
+    print(f"Hasil prediksi (termasuk aktual yang up-to-date) disimpan ke: {file_path}")
 
 def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metrics.json"):
     """
@@ -79,12 +107,10 @@ def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metric
         json.dump(all_metrics, f, indent=4)
     print(f"Metrik model disimpan ke: {file_path}")
 
+
 # --- FUNGSI UTAMA ORKESTRASI (PIPELAINE UTAMA YANG DIJALANKAN GH ACTIONS) ---
 def run_mlops_pipeline(
-    train_path="processed_data/train.csv", 
-    val_path="processed_data/val.csv", 
-    test_path="processed_data/test.csv", # Data untuk prediksi masa depan (bisa tanpa kolom 'y')
-    actuals_for_dashboard_path="data/historical_actuals.csv", # Data aktual historis untuk perbandingan dashboard
+    master_data_path="data/master_electricity_prices.csv",
     forecast_horizon=24,
     es_season_list=[6, 12, 24], # Contoh daftar periode musiman untuk ES
     theta_season_list=[6, 12, 24] # Contoh daftar periode musiman untuk Theta
@@ -92,223 +118,177 @@ def run_mlops_pipeline(
     print("Memulai MLOps Pipeline...")
     
     # --- MLflow Outer Run for the entire MLOps Pipeline execution ---
-    with mlflow.start_run(run_name="Full_MLOps_Pipeline_Run"):
+    # Ini akan menjadi run utama yang mencakup seluruh proses MLOps
+    with mlflow.start_run(run_name="Full_MLOps_Pipeline_Run") as pipeline_run:
         mlflow.log_param("pipeline_start_time", datetime.now().isoformat())
         mlflow.log_param("forecast_horizon", forecast_horizon)
         
         # 1. Load dan Preprocess Data
         print("Memuat dan memproses data...")
-        train_df, val_df, test_df, full_training_df = load_and_preprocess_data(train_path, val_path, test_path)
+        train_df, val_df, test_df_for_prediction, full_training_df, master_df_full = \
+            load_and_preprocess_data(master_data_path)
         
+        mlflow.log_param("master_data_rows", len(master_df_full))
         mlflow.log_param("train_data_rows", len(train_df))
         mlflow.log_param("val_data_rows", len(val_df))
-        mlflow.log_param("test_data_rows", len(test_df))
+        mlflow.log_param("test_data_for_prediction_rows", len(test_df_for_prediction))
         
         # 2. Optimasi dan Pemilihan Model (Theta vs. Exponential Smoothing)
         print("Memulai optimasi model Theta...")
-        theta_model_instance = ThetaModel(freq='h', forecast_horizon=forecast_horizon) # Asumsi data hourly
-        best_theta_mae, best_theta_params, best_theta_model_obj = theta_model_instance.optimize(
+        theta_model_instance = ThetaModel(freq='h', forecast_horizon=forecast_horizon) 
+        best_theta_mae, best_theta_params, best_theta_model_obj, theta_run_id = theta_model_instance.optimize(
             df=full_training_df, forecast_horizon=forecast_horizon, season_list=theta_season_list
         )
         mlflow.log_metric("overall_theta_best_mae", best_theta_mae)
+        mlflow.log_param("theta_optimization_run_id", theta_run_id)
+
 
         print("\nMemulai optimasi model Exponential Smoothing...")
-        # Asumsikan kita mendeteksi trend/seasonality sebelumnya atau mengujinya di sini
-        # Untuk contoh ini, kita set has_trend=True dan seasonal_periods=24
         es_model_instance = ExponentialSmoothingModel(
             has_trend=True, seasonal_periods=24, seasonal_type='add', forecast_horizon=forecast_horizon
         ) 
-        best_es_mae, best_es_params, best_es_model_obj = es_model_instance.optimize(
+        best_es_mae, best_es_params, best_es_model_obj, es_run_id = es_model_instance.optimize(
             df=full_training_df.rename(columns={'y': 'y', 'ds': 'ds', 'unique_id': 'unique_id'}), # ES expects 'y'
             forecast_horizon=forecast_horizon, season_list=es_season_list
         )
         mlflow.log_metric("overall_es_best_mae", best_es_mae)
+        mlflow.log_param("es_optimization_run_id", es_run_id)
 
         # 3. Pilih Model Terbaik Secara Global
         print("\nMemilih model terbaik secara keseluruhan...")
         overall_best_model_name = ""
         overall_best_mae = float('inf')
         overall_best_model_obj = None
-        overall_best_run_id = None
-        mlflow_artifact_path = ""
+        overall_best_artifact_path = ""
+        overall_best_run_id = "" # Run ID dari run MLflow yang melog model terbaik
 
-        if best_theta_mae < overall_best_mae:
+        if best_theta_model_obj and best_theta_mae < overall_best_mae:
             overall_best_mae = best_theta_mae
             overall_best_model_name = "ThetaModel"
             overall_best_model_obj = best_theta_model_obj
-            # Dapatkan run_id dari run yang melog model terbaik Theta
-            # Ini memerlukan modifikasi di Theta.py untuk mengembalikan run_id
-            # Untuk sementara, asumsikan kita punya cara untuk mendapatkannya dari MLflow Tracking UI.
-            mlflow_artifact_path = "champion_theta_model" # Sesuai artifact_path di Theta.py
+            overall_best_run_id = theta_run_id
+            overall_best_artifact_path = "champion_theta_model" # Sesuai artifact_path di Theta.py
             
-        if best_es_mae < overall_best_mae:
+        if best_es_model_obj and best_es_mae < overall_best_mae:
             overall_best_mae = best_es_mae
             overall_best_model_name = "ExponentialSmoothingModel"
             overall_best_model_obj = best_es_model_obj
-            mlflow_artifact_path = "champion_es_model" # Sesuai artifact_path di ExponentialSmoothing.py
+            overall_best_run_id = es_run_id
+            overall_best_artifact_path = "champion_es_model" # Sesuai artifact_path di ExponentialSmoothing.py
             
         if overall_best_model_obj is None:
             print("Peringatan: Tidak ada model yang berhasil dioptimasi atau tidak ada model terbaik ditemukan.")
-            # Mungkin fallback ke model default atau keluar dari pipeline
             mlflow.log_param("status", "No_Best_Model_Found")
             return
 
         print(f"Model terbaik secara keseluruhan: {overall_best_model_name} dengan MAE Validasi: {overall_best_mae:.4f}")
         mlflow.log_param("overall_best_model_name", overall_best_model_name)
         mlflow.log_metric("overall_best_validation_mae", overall_best_mae)
+        mlflow.log_param("overall_best_model_run_id", overall_best_run_id)
 
         # 4. Registrasi Model Terbaik ke MLflow Model Registry
+        # Kita akan meregistrasikan model yang sudah di-log di nested run
         print(f"Mendaftarkan model '{overall_best_model_name}' ke MLflow Model Registry...")
         
-        # Karena kita melog model di dalam metode optimize(), 
-        # kita perlu memastikan model tersebut terdaftar dari run yang benar.
-        # Cara termudah adalah dengan melognya lagi di sini dan mereferensikan run_id asalnya.
-        
-        # Untuk contoh ini, kita akan mereferensikan artefak model dari run terbaik
-        # dan mendaftarkannya ke registry.
-        # Anda perlu mendapatkan run_id dari run MLflow yang menghasilkan model terbaik
-        # Misalnya, Anda bisa menyimpannya sebagai bagian dari return best_model_obj
-        # Atau, setelah optimize(), query MLflow Tracking untuk menemukan run_id dengan best_validation_mae tertinggi.
-        
-        # Dummy run_id untuk demonstrasi:
-        # best_model_run_id = "your_best_model_mlflow_run_id" 
-        
-        # Paling baik: log model ini lagi di overall run ini, lalu register
-        # Karena Theta dan ES pakai joblib/StatsForecast/statsmodels, 
-        # kita perlu wrapper pyfunc jika tidak ada native flavor
-        
-        # --- Wrapper sederhana untuk model yang dimuat joblib ---
-        class GenericPyfuncModel(mlflow.pyfunc.PythonModel):
-            def __init__(self, model_path):
-                self.model_path = model_path
-                self.model = None
+        # URI model di MLflow tracking dari run terbaik
+        model_uri_to_register = f"runs:/{overall_best_run_id}/{overall_best_artifact_path}"
 
-            def load_context(self, context):
-                # Memuat model asli dari file joblib
-                self.model = joblib.load(self.model_path)
-
-            def predict(self, context, model_input: pd.DataFrame):
-                # Sesuaikan input DataFrame dengan format yang diharapkan model Anda
-                # Misalnya, untuk Theta/ES, butuh kolom 'ds', 'unique_id'
-                # Pastikan 'ds' bertipe datetime dan naive
-                model_input['ds'] = pd.to_datetime(model_input['ds']).dt.tz_localize(None)
-
-                # Panggil metode predict dari model yang dimuat
-                if hasattr(self.model, 'predict'):
-                    if overall_best_model_name == "ThetaModel":
-                        # predict() dari StatsForecast butuh input df, kasih df future dates
-                        forecast_output = self.model.predict(model_input)
-                        # hasil forecast_output StatsForecast punya kolom 'ds', 'unique_id', 'yhat'
-                        return forecast_output.rename(columns={'yhat': 'predicted_value'})
-                    elif overall_best_model_name == "ExponentialSmoothingModel":
-                        # predict() dari ExponentialSmoothingModel butuh df, tapi isinya future dates
-                        # Hasilnya harus di-DataFrame-kan dan diberi index yang benar
-                        forecast_values = self.model.predict(len(model_input)) # Atau self.model.predict(model_input)
-                        # Perlu buat df dengan index yang sesuai
-                        forecast_df = pd.DataFrame({'ds': model_input['ds'], 'predicted_value': forecast_values})
-                        return forecast_df
-                    else:
-                        raise ValueError("Model predict method not implemented for selected model type.")
-                else:
-                    raise AttributeError("Loaded model does not have a 'predict' method.")
-        
-        # Simpan model terbaik secara lokal sebelum meregistrasi sebagai pyfunc
-        overall_best_champion_path = os.path.join("artifacts/models", f"{overall_best_model_name.lower()}_champion.joblib")
-        # Asumsikan best_model_obj.model adalah objek model yang sudah fit (e.g., StatsForecast object atau ExponentialSmoothing fitted object)
-        joblib.dump(overall_best_model_obj.model, overall_best_champion_path)
-
-        # Log dan Registrasi model menggunakan Pyfunc
-        with mlflow.start_run(run_name="Register Overall Champion", nested=True):
-            mlflow.pyfunc.log_model(
-                artifact_path="overall_best_forecaster",
-                python_model=GenericPyfuncModel(overall_best_champion_path), # Wrapper kita
-                registered_model_name="ElectricityForecaster" # Nama di MLflow Model Registry
-            )
-            print(f"Model '{overall_best_model_name}' didaftarkan sebagai 'ElectricityForecaster' di MLflow Model Registry.")
+        mlflow.register_model(
+            model_uri=model_uri_to_register,
+            name="ElectricityPriceForecaster", # Nama model di registry Anda
+            tags={"project": "MLOps_Finland_Electricity", "source_pipeline_run": pipeline_run.info.run_id},
+            description=f"Overall best model ({overall_best_model_name}) from pipeline run {pipeline_run.info.run_id}."
+        )
+        print(f"Model '{overall_best_model_name}' versi terbaru didaftarkan sebagai 'ElectricityForecaster' di MLflow Model Registry.")
 
         # 5. Lakukan Forecasting dan Simpan Hasil
         print("Melakukan forecasting dan menyimpan hasil untuk dashboard...")
         
-        # Pastikan test_df adalah data untuk periode masa depan yang ingin diprediksi
-        # Jika test_df tidak punya kolom 'y', ini adalah prediksi murni masa depan
-        
         # Buat DataFrame untuk future dates
         last_train_timestamp = full_training_df['ds'].max()
         future_dates = pd.date_range(
-            start=last_train_timestamp + pd.Timedelta(hours=1), # Mulai dari 1 jam setelah data training terakhir
+            start=last_train_timestamp + pd.Timedelta(hours=1), 
             periods=forecast_horizon, 
             freq='H' # Sesuaikan frekuensi data Anda (H=Hourly, D=Daily)
         )
         
-        # Buat DataFrame input untuk prediksi
         future_input_df = pd.DataFrame({'ds': future_dates})
         if 'unique_id' in full_training_df.columns:
-            future_input_df['unique_id'] = full_training_df['unique_id'].iloc[0] # Asumsi single series
+            future_input_df['unique_id'] = full_training_df['unique_id'].iloc[0]
         future_input_df['y'] = np.nan # Tambahkan kolom 'y' dummy jika diperlukan oleh predict method
 
         # Muat model terbaik yang baru saja didaftarkan untuk melakukan forecasting
         # Ini akan memastikan kita menggunakan model dari registry
-        loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/Production")
+        # Muat model dengan stage 'Production' jika sudah dipromosikan (biasanya secara manual atau terpisah)
+        # Untuk pertama kali deploy, kita bisa muat versi terbaru langsung
+        try:
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/Production")
+            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Production Stage).")
+        except Exception as e:
+            print(f"Gagal memuat model Production: {e}. Mencoba memuat versi terbaru yang terdaftar.")
+            # Fallback: load versi terbaru jika Production belum ada/gagal
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/latest")
+            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Versi Terbaru).")
         
         # Lakukan prediksi
-        forecast_result_df = loaded_forecaster.predict(future_input_df) # Ini akan mengembalikan DataFrame dengan predicted_value
+        forecast_result_df = loaded_forecaster.predict(future_input_df) 
 
         # --- Simpan Hasil Prediksi dan Metrik untuk Dashboard ---
-        # Data aktual historis untuk perbandingan di dashboard (historical_actuals.csv)
-        # Ini adalah data aktual dari masa lalu yang akan digunakan dashboard
-        actual_data_for_dashboard = pd.read_csv(actuals_for_dashboard_path, parse_dates=['ds'])
-        actual_data_for_dashboard = actual_data_for_dashboard.rename(columns={'value': 'y', 'timestamp': 'ds'}) # Sesuaikan kolom
-
-        save_forecast_to_csv(forecast_result_df, actual_data_for_dashboard, "data/forecasts/latest_forecast.csv")
+        # save_forecast_to_csv membutuhkan master_df_full sebagai sumber aktual
+        save_forecast_to_csv(forecast_result_df, master_df_full, "data/forecasts/latest_forecast.csv")
 
         # Save metrik untuk dashboard (dari evaluasi test set)
-        final_metrics = {
+        final_metrics_for_dashboard = {
             "model_name": overall_best_model_name,
             "MAE": overall_best_mae, # MAE dari validasi (cross-validation)
             "forecast_horizon": forecast_horizon,
-            "best_params": overall_best_params_found # Simpan juga parameter terbaiknya
+            "best_params": overall_best_params_found
         }
-        save_metrics_to_json(final_metrics, "artifacts/metrics/model_metrics.json")
+        save_metrics_to_json(final_metrics_for_dashboard, "artifacts/metrics/model_metrics.json")
         
-        mlflow.log_metric("pipeline_end_time", datetime.now().isoformat())
+        mlflow.log_param("pipeline_end_time", datetime.now().isoformat())
         print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
 
 # ====================================================================================================
-# BLOK EKSEKUSI UTAMA
+# BLOK EKSEKUSI UTAMA (untuk menjalankan pipeline)
 # ====================================================================================================
 
 if __name__ == "__main__":
-    # Konfigurasi MLflow Tracking Server (jika tidak lokal)
-    # Ini harus diset sebelum run MLflow pertama
-    # Jika Anda menjalankan server MLflow terpisah (misalnya di Azure), ubah URI ini
-    # Contoh: os.environ["MLFLOW_TRACKING_URI"] = "https://your-mlflow-server.azureml.net/mlflow/v1.0/subscriptions/..."
-    # Atau jika Anda menjalankan secara lokal dengan database:
-    # os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlruns.db" 
+    # --- Konfigurasi MLflow Tracking Server ---
+    # Jika Anda menggunakan server MLflow terpisah (misalnya di Azure ML Workspace),
+    # Anda perlu mengatur MLFLOW_TRACKING_URI dan kredensial.
+    # Contoh:
+    # os.environ["MLFLOW_TRACKING_URI"] = "azureml://eastus.api.azureml.ms/mlflow/v1.0/subscriptions/YOUR_SUBS_ID/resourceGroups/YOUR_RG/providers/Microsoft.MachineLearningServices/workspaces/YOUR_WORKSPACE_NAME"
+    # os.environ["AZURE_CLIENT_ID"] = "..."
+    # os.environ["AZURE_TENANT_ID"] = "..."
+    # os.environ["AZURE_CLIENT_SECRET"] = "..."
     
     # Untuk local testing tanpa server MLflow eksternal, cukup biarkan default (akan membuat folder 'mlruns')
-    # mlflow.set_tracking_uri("http://127.0.0.1:5000") # Jika Anda menjalankan 'mlflow ui' terpisah
+    # Anda juga bisa mengarahkan ke database lokal untuk persistensi run
+    # mlflow.set_tracking_uri("sqlite:///mlruns.db") # Contoh dengan database SQLite
 
     # Path ke data Anda
-    train_data_path = 'processed_data/train.csv'
-    val_data_path = 'processed_data/val.csv'
-    test_data_path = 'processed_data/test.csv' # Ini adalah data yang akan Anda prediksi (future data)
-    historical_actuals_for_dashboard = 'data/historical_actuals.csv' # Untuk perbandingan di dashboard
-
-    # Pastikan file dummy ada untuk pengujian lokal jika Anda belum menjalankan ingestion
+    master_data_path = 'data/master_electricity_prices.csv'
+    
+    # --- Pastikan file dummy ada untuk pengujian lokal jika Anda belum menjalankan ingestion ---
     os.makedirs('data', exist_ok=True)
-    if not os.path.exists(train_data_path):
-        pd.DataFrame({'timestamp': pd.date_range('2024-01-01', periods=100, freq='H'), 'value': np.random.rand(100)*100}).to_csv(train_data_path, index=False)
-    if not os.path.exists(val_data_path):
-        pd.DataFrame({'timestamp': pd.date_range('2024-01-01', periods=24, freq='H'), 'value': np.random.rand(24)*100}).to_csv(val_data_path, index=False)
-    if not os.path.exists(test_data_path): # Ini adalah data masa depan yang akan diprediksi
-        pd.DataFrame({'timestamp': pd.date_range('2024-01-01', periods=24, freq='H'), 'value': np.random.rand(24)*100}).to_csv(test_data_path, index=False)
-    if not os.path.exists(historical_actuals_for_dashboard): # Data aktual untuk visualisasi dashboard
-        pd.DataFrame({'ds': pd.date_range('2024-01-01', periods=200, freq='H'), 'y': np.random.rand(200)*100}).to_csv(historical_actuals_for_dashboard, index=False)
+    os.makedirs('data/forecasts', exist_ok=True)
+    os.makedirs('artifacts/metrics', exist_ok=True)
+    os.makedirs('artifacts/models', exist_ok=True)
+    os.makedirs('artifacts', exist_ok=True) # Untuk pipeline_timings.json
+
+    if not os.path.exists(master_data_path):
+        print("Membuat data dummy master_electricity_prices.csv untuk pengujian lokal...")
+        pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=200, freq='H'),
+            'value': np.random.rand(200)*100,
+            'unique_id': 'series_1'
+        }).to_csv(master_data_path, index=False)
+
+    # Note: latest_forecast.csv dan model_metrics.json akan dibuat oleh run_mlops_pipeline itu sendiri
+    # Jika ada, mereka akan ditimpa/di-append
 
     run_mlops_pipeline(
-        train_path=train_data_path,
-        val_path=val_data_path,
-        test_path=test_data_path,
-        actuals_for_dashboard_path=historical_actuals_for_dashboard,
-        forecast_horizon=24 # Contoh: prediksi 24 jam ke depan
+        master_data_path=master_data_path,
+        forecast_horizon=24 
     )
