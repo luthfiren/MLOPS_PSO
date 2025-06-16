@@ -6,6 +6,7 @@ import pytest
 import json
 import hashlib
 import numpy as np
+import importlib.util
 from datetime import datetime, timezone, timedelta
 from sklearn.preprocessing import StandardScaler
 
@@ -339,3 +340,61 @@ def test_finalize_csv_removes_duplicates_and_sorts():
 
     os.remove(tmpfile_name)
     
+## -------------------------------------
+# test model:
+from model import ALL_MODEL_CLASSES
+# ------------------------------------- 
+@pytest.fixture
+def dummy_timeseries_df():
+    n = 100
+    return pd.DataFrame({
+        "unique_id": ["ts1"] * n,
+        "ds": pd.date_range("2021-01-01", periods=n, freq="H"),
+        "y": np.random.normal(100, 10, size=n)
+    })
+
+@pytest.fixture
+def dummy_timeseries_df():
+    # Jumlah data cukup panjang agar fold training cukup untuk seasonal model (misal seasonal_periods=12)
+    n = 200
+    return pd.DataFrame({
+        "unique_id": ["ts1"] * n,
+        "ds": pd.date_range("2021-01-01", periods=n, freq="h"),
+        "y": np.random.normal(100, 10, size=n)
+    })
+
+@pytest.mark.parametrize("ModelCls", list(ALL_MODEL_CLASSES.values()))
+def test_model_lifecycle(ModelCls, dummy_timeseries_df, tmp_path):
+    model = ModelCls()
+
+    folds = model.create_folds(dummy_timeseries_df, n_splits=3, test_size=24)
+    assert len(folds) > 0
+
+    avg_score = model.train_with_fold(folds)
+    assert avg_score >= 0
+
+    last_train, last_test = folds[-1]
+    pred_df = last_test.copy()
+    pred = model.predict(pred_df, h=len(pred_df))
+    assert isinstance(pred, pd.DataFrame)
+
+    # Map kolom prediksi apapun ke yhat jika belum ada
+    if "yhat" not in pred.columns:
+        pred_cols = [c for c in pred.columns if c not in ["ds", "unique_id", "y"]]
+        if pred_cols:
+            pred = pred.rename(columns={pred_cols[0]: "yhat"})
+    # Drop kolom y dari pred supaya merge tidak kena suffix y_x/y_y
+    if "y" in pred.columns:
+        pred = pred.drop(columns=["y"])
+
+    # Evaluasi (fungsi evaluate di model harus pakai merged['y'] dan merged['yhat'])
+    score = model.evaluate(last_test, pred)
+    assert score >= 0
+
+    # Save model ke temporary path pytest
+    save_path = tmp_path / "model_champion.joblib"
+    try:
+        model.save(str(save_path))
+    except TypeError:
+        model.save(model_path=str(save_path))
+    assert save_path.exists()

@@ -1,4 +1,4 @@
-# model/theta_model.py
+from model.base_model import BaseForecastModel
 import logging
 from pathlib import Path
 import pandas as pd
@@ -14,7 +14,7 @@ from sklearn.model_selection import ParameterGrid
 from statsforecast.models import Theta
 from statsforecast import StatsForecast
 
-class ThetaModel:
+class ThetaModel(BaseForecastModel):
     def __init__(self, season_length=12, freq='h', forecast_horizon=24):
         # Validate frequency
         supported_freq = ['h', 'd', 'w', 'm']
@@ -128,7 +128,7 @@ class ThetaModel:
 
     def save(self, model_path=None, config_path=None, score_path=None, score=None):
         model_path = model_path or self.model_file
-        config_path = config_path or self.config_path
+        config_path = config_path or self.champion_config_file
         score_path = score_path or self.champion_score_file
 
         joblib.dump(self.model, model_path)
@@ -142,30 +142,6 @@ class ThetaModel:
         self.logger.info(f"Saved champion config to {config_path}")
         if score is not None:
             self.logger.info(f"Champion model score ({score}) saved to {score_path}")
-
-    def create_folds(self, df, n_splits, test_size):
-        """
-        Time series split into n_splits folds with fixed test_size,
-        growing training data, and sequential test sets (non-overlapping).
-        Returns list of (train_df, test_df) tuples.
-        """
-        folds = []
-        total_points = len(df)
-        step = (total_points - test_size * n_splits) // n_splits
-
-        for i in range(n_splits):
-            train_end = step * (i + 1) + test_size * i
-            test_start = train_end
-            test_end = test_start + test_size
-
-            if test_end > total_points:
-                break  # not enough data for this fold
-
-            train_df = df.iloc[:train_end]
-            test_df = df.iloc[test_start:test_end]
-            folds.append((train_df, test_df))
-
-        return folds
 
     def create_folds(self, df, n_splits, test_size):
         """

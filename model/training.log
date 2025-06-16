@@ -10,3 +10,24 @@
 2025-06-10 12:17:33,635 - ThetaModel - INFO - Saved champion config to C:\DataD\MATKUL\Semester_6\pso\MLOPS_PSO\model\champion_config.json
 2025-06-10 12:17:33,635 - ThetaModel - INFO - Champion model score (0.2621389620553691) saved to C:\DataD\MATKUL\Semester_6\pso\MLOPS_PSO\model\champion_score.txt
 2025-06-10 12:17:33,636 - ThetaModel - INFO - New champion saved: {'forecast_horizon': 24, 'season_length': 21} | Score: 0.2621389620553691
+2025-06-16 14:59:41,015 - ThetaModel - INFO - ThetaModel Average MAE across 3 folds = 8.4608, Training Time = 0.01 seconds
+2025-06-16 15:02:32,640 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 3 folds = 7.9771, Training Time = 0.04 seconds
+2025-06-16 15:02:33,040 - ThetaModel - INFO - ThetaModel Average MAE across 3 folds = 7.9618, Training Time = 0.03 seconds
+2025-06-16 15:02:33,048 - ThetaModel - INFO - Saved champion model to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-1\test_model_lifecycle_ThetaMode0\model_champion.joblib
+2025-06-16 15:02:33,048 - ThetaModel - INFO - Saved champion config to C:\file aji\semester6\pso\MLOPS_PSO-9\model\champion_config.json
+2025-06-16 15:09:11,071 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 3 folds = 9.4674, Training Time = 0.04 seconds
+2025-06-16 15:09:11,453 - ThetaModel - INFO - ThetaModel Average MAE across 3 folds = 8.3798, Training Time = 0.02 seconds
+2025-06-16 15:09:11,462 - ThetaModel - INFO - Saved champion model to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-2\test_model_lifecycle_ThetaMode0\model_champion.joblib
+2025-06-16 15:09:11,462 - ThetaModel - INFO - Saved champion config to C:\file aji\semester6\pso\MLOPS_PSO-9\model\champion_config.json
+2025-06-16 15:16:31,894 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 3 folds = 8.2731, Training Time = 0.04 seconds
+2025-06-16 15:16:31,897 - Exponential Smoothing Model - ExponentialSmoothing MAE=11.8902 with season_length=-, horizon=24
+2025-06-16 15:16:31,900 - Exponential Smoothing Model - Saved champion model with params baseline to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-3\test_model_lifecycle_Exponenti0\model_champion.joblib
+2025-06-16 15:16:31,920 - ThetaModel - INFO - ThetaModel Average MAE across 3 folds = 8.1610, Training Time = 0.02 seconds
+2025-06-16 15:16:31,928 - ThetaModel - INFO - Saved champion model to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-3\test_model_lifecycle_ThetaMode0\model_champion.joblib
+2025-06-16 15:16:31,928 - ThetaModel - INFO - Saved champion config to C:\file aji\semester6\pso\MLOPS_PSO-9\model\champion_config.json
+2025-06-16 15:36:17,932 - Exponential Smoothing Model - ExponentialSmoothing Average MAE across 3 folds = 8.3881, Training Time = 0.04 seconds
+2025-06-16 15:36:17,935 - Exponential Smoothing Model - ExponentialSmoothing MAE=8.2122 with season_length=-, horizon=24
+2025-06-16 15:36:17,938 - Exponential Smoothing Model - Saved champion model with params baseline to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-4\test_model_lifecycle_Exponenti0\model_champion.joblib
+2025-06-16 15:36:17,960 - ThetaModel - INFO - ThetaModel Average MAE across 3 folds = 8.2602, Training Time = 0.02 seconds
+2025-06-16 15:36:17,970 - ThetaModel - INFO - Saved champion model to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-4\test_model_lifecycle_ThetaMode0\model_champion.joblib
+2025-06-16 15:36:17,971 - ThetaModel - INFO - Saved champion config to C:\file aji\semester6\pso\MLOPS_PSO-9\model\champion_config.json

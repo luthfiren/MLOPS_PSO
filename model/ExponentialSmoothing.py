@@ -1,3 +1,4 @@
+from model.base_model import BaseForecastModel
 import numpy as np
 import logging
 import joblib
@@ -17,7 +18,7 @@ CHAMPION_CONFIG = os.path.join(MODEL_DIR, 'champion_config.json')
 CHAMPION_MODEL = os.path.join(MODEL_DIR, 'champion_model.joblib')
 
 # Model ES (Simple Exponential)
-class ExponentialSmoothingModel:
+class ExponentialSmoothingModel(BaseForecastModel):
     def __init__(self, has_trend=False, seasonal_periods=12, seasonal_type='add', forecast_horizon=24, damped_trend=False, trend_type=None):
         self.has_trend = has_trend
         self.seasonal_periods = seasonal_periods  # or some default
@@ -96,16 +97,19 @@ class ExponentialSmoothingModel:
         # Generate forecast values
         forecast_values = self.model.forecast(steps=h)
 
-        # Assign 'yhat' as a new column in val_df
-        preds_df = pred_df.copy()  # to avoid modifying the original df outside
-        preds_df.loc[:h-1, "y"] = forecast_values.astype(preds_df["y"].dtype)
+        # Output DataFrame: unique_id, ds, yhat
+        preds_df = pd.DataFrame({
+            "unique_id": pred_df["unique_id"].values,
+            "ds": pd.to_datetime(pred_df["ds"]).values,
+            "yhat": forecast_values.astype(float)
+        })
 
         return preds_df
 
     def evaluate(self, actual_df: pd.DataFrame, forecast_df: pd.DataFrame):
         merged = actual_df.merge(forecast_df, on=["unique_id", "ds"])
         score = mean_absolute_error(merged["y"], merged["yhat"])
-        self.logger.info(f"{self.model_name} MAE={score:.4f} with season_length={self.season_length}, horizon={self.forecast_horizon}")
+        self.logger.info(f"{self.model_name} MAE={score:.4f} with season_length={getattr(self, 'season_length', '-')}, horizon={self.forecast_horizon}")
         return score
     
     def save(self, path: str = None):
@@ -202,7 +206,7 @@ class ExponentialSmoothingModel:
                     best_model = model
 
             except Exception as e:
-            #     self.logger.warning(f"Skipping params {params} due to error: {e}")
+                # self.logger.warning(f"Skipping params {params} due to error: {e}")
                 continue
 
         if best_model:
