@@ -1,0 +1,8 @@
+# Created by pytest automatically.
+.pytest_cache/
+
+# Virtual Environment
+newVenv/
+
+# cache
+__pycache__

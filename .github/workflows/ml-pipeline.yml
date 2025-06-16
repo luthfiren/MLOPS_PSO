@@ -23,32 +23,60 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirement.txt
-          pip install jupyter
+          pip install jupyter mlflow
 
-      - name: Data Ingestion Fingrid & FMI
+      - name: Run ML Pipeline (Ingestion, Preprocessing, Trainng, MLFlow logging)
         run: |
-          python importingDataFinGrid.py
-          python importingDataFMI.py
+          python imodelling.py
 
-      - name: Data Preprocessing
+      - name: Download Production Model from MLflow Registry
+        # Meskipun tracking-nya "lokal" ke runner, Model Registry tetap berfungsi.
+        # MLflow akan mencari 'mlruns/' yang dibuat oleh langkah sebelumnya
+        # untuk menemukan model yang terdaftar (meskipun hanya dalam run ini).
         run: |
-          jupyter nbconvert --to notebook --execute preprocessing.ipynb
+          mkdir -p ./publish/artifacts/models/ # Buat direktori di paket publish
           
-      - name: Train and Evaluate ML Model
-        run: |
-          python modelling.py # This assumes modelling.py will execute your training and evaluation logic
-          # If your modelling.py requires specific arguments or functions to be called,
-          # you might need to adjust this line. For example:
-          # python -c "from modelling import train_sarima_model; train_sarima_model()"
-          # Or if it has a main function:
-          # python -c "from modelling import main; main()"
+          # Coba unduh model versi 'Production'. Jika gagal, coba versi 'latest'.
+          MODEL_NAME="ElectricityForecaster"
+          MODEL_PATH="./publish/artifacts/models/deployed_model" # Lokasi model di paket deployment
+
+          echo "Mencoba mengunduh model '$MODEL_NAME' versi 'Production'..."
+          # Gunakan perintah `mlflow models download` atau `mlflow.pyfunc.save_model` (dari Python)
+          # di sini untuk mengunduh model dari registry lokal (yang ada di folder mlruns saat ini).
+          # Karena ini adalah environment GitHub Actions, kita bisa langsung pakai CLI
+          
+          # Pastikan mlflow CLI tersedia di path.
+          # Jika `mlflow models download` tidak bekerja, Anda bisa menggunakan `mlflow.pyfunc.save_model`
+          # dari script Python terpisah yang dijalankan di sini.
+
+          # --- Menggunakan mlflow.pyfunc.save_model dari python script dalam run step ---
+          # Ini lebih andal karena menggunakan Python environment yang sama
+          python -c "
+          import mlflow
+          import os
+
+          MODEL_NAME = '$MODEL_NAME'
+          MODEL_PATH = '$MODEL_PATH'
+
+          try:
+            print(f'Attempting to download production model: models:/{MODEL_NAME}/Production')
+            mlflow.pyfunc.save_model(path=MODEL_PATH, mlflow_model_uri=f'models:/{MODEL_NAME}/Production')
+            print('Production model downloaded successfully.')
+          except Exception as e_prod:
+            print(f'Failed to download production model ({e_prod}). Attempting to download latest version...')
+            try:
+              mlflow.pyfunc.save_model(path=MODEL_PATH, mlflow_model_uri=f'models:/{MODEL_NAME}/latest')
+              print('Latest model downloaded successfully.')
+            except Exception as e_latest:
+              print(f'Error: Failed to download any version of model {MODEL_NAME} from MLflow Registry: {e_latest}')
+              exit(1) # Gagal jika tidak ada model yang bisa diunduh
+          "   
           
       - name: Prepare Deployment Package
         run: |
           # Buat direktori 'publish' jika belum ada untuk mengumpulkan semua file yang diperlukan
           mkdir -p ./publish/data/forecasts/
           mkdir -p ./publish/artifacts/metrics/
-          mkdir -p ./publish/artifacts/models/ # Untuk model yang sudah dilatih
           mkdir -p ./publish/templates/ # Untuk template HTML (misal: untuk Flask/Django)
           mkdir -p ./publish/static/ # Untuk file statis (CSS, JS, gambar)
 
@@ -56,16 +84,15 @@ jobs:
           # Sesuaikan daftar file/folder ini dengan struktur proyek Python Anda
           cp app.py ./publish/
           cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
-          cp -r templates/ ./publish/
-          cp -r static/ ./publish/
-          # Salin model yang sudah dilatih (asumsi 'trained_model.pkl' dibuat oleh 'modelling.py')
-          cp -r model/ ./publish/
+          cp templates/*.html/publish/templates/
+          cp static/* ./publish/static/
 
-          # Kompres seluruh isi direktori 'publish' menjadi satu file .zip
-          # Masuk ke direktori 'publish' terlebih dahulu agar isi zip berada langsung di root-nya.
-          cd publish
-          zip -r ../release.zip .
-          cd .. # Kembali ke direktori root repository
+          # Salin file data MASTER terbaru (dihasilkan oleh ingestion)
+          cp data/master_electricity_prices.csv ./publish/data/
+
+          # Salin artefak yang dihasilkan oleh modelling.py (latest_forecast.csv dan model_metrics.json)
+          cp data/forecasts/latest_forecast.csv ./publish/data/forecasts/
+          cp artifacts/metrics/model_metrics.json ./publish/artifacts/metrics/
 
       - name: Upload Application Artifact
         uses: actions/upload-artifact@v4
@@ -74,43 +101,67 @@ jobs:
           name: python-app
           # Path ke file .zip yang baru saja dibuat
           path: release.zip
-
+  
   deploy:
+    name: Deploy to Azure
     runs-on: ubuntu-latest
-    # Job 'deploy' bergantung pada keberhasilan job 'ml-lifecycle'
     needs: [ml-lifecycle]
-    environment:
-      # Mendefinisikan environment untuk deployment, berguna untuk proteksi dan URL preview
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    permissions:
-      # Diperlukan untuk meminta JWT (JSON Web Token) jika menggunakan OIDC untuk autentikasi.
-      id-token: write
+
     steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          # Mengunduh artifact 'python-app' yang diunggah oleh job 'ml-lifecycle'
-          name: python-app
-          # File akan diunduh ke direktori kerja saat ini (yaitu './release.zip')
+        - uses: actions/checkout@v4
 
-      - name: Verify downloaded artifact
-        run: ls # Untuk memverifikasi bahwa 'release.zip' ada setelah diunduh
+        - name: Download artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: webapp-package  
+            path: ./downloaded-package
 
-      # Langkah unzip ini mungkin tidak selalu diperlukan karena 'azure/webapps-deploy'
-      # action biasanya dapat langsung menerima file .zip sebagai input 'package'.
-      # Namun, kami menyertakannya sesuai dengan contoh yang Anda berikan.
-      # Jika 'package' diharapkan menunjuk ke folder yang tidak di-zip,
-      # maka 'unzip' diperlukan dan 'package' harus diubah ke path folder yang tidak di-zip.
-      - name: Unzip artifact for deployment
-        run: unzip release.zip
+        - name: Deploy to Azure Web App
+          uses: azure/webapps-deploy@v2
+          with:
+            app-name: ${{ env.AZURE_WEBAPP_NAME }}
+            publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+            package: ./downloaded-package
+            # Pastikan startup command Anda memuat model dari path yang benar di dalam paket:
+            # startup-command: gunicorn --bind 0.0.0.0 --timeout 600 app:app
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2 # Gunakan v2 untuk publish-profile, atau v3 juga mendukung
-        id: deploy-to-webapp
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          slot-name: 'Production'
-          package: './release.zip'
-          # TAMBAHKAN BARIS INI UNTUK MENGGUNAKAN PUBLISH PROFILE
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+
+  # deploy:
+  #   runs-on: ubuntu-latest
+  #   # Job 'deploy' bergantung pada keberhasilan job 'ml-lifecycle'
+  #   needs: [ml-lifecycle]
+  #   environment:
+  #     # Mendefinisikan environment untuk deployment, berguna untuk proteksi dan URL preview
+  #     name: 'Production'
+  #     url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+  #   permissions:
+  #     # Diperlukan untuk meminta JWT (JSON Web Token) jika menggunakan OIDC untuk autentikasi.
+  #     id-token: write
+  #   steps:
+  #     - name: Download artifact from build job
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         # Mengunduh artifact 'python-app' yang diunggah oleh job 'ml-lifecycle'
+  #         name: python-app
+  #         # File akan diunduh ke direktori kerja saat ini (yaitu './release.zip')
+
+  #     - name: Verify downloaded artifact
+  #       run: ls # Untuk memverifikasi bahwa 'release.zip' ada setelah diunduh
+
+  #     # Langkah unzip ini mungkin tidak selalu diperlukan karena 'azure/webapps-deploy'
+  #     # action biasanya dapat langsung menerima file .zip sebagai input 'package'.
+  #     # Namun, kami menyertakannya sesuai dengan contoh yang Anda berikan.
+  #     # Jika 'package' diharapkan menunjuk ke folder yang tidak di-zip,
+  #     # maka 'unzip' diperlukan dan 'package' harus diubah ke path folder yang tidak di-zip.
+  #     - name: Unzip artifact for deployment
+  #       run: unzip release.zip
+
+  #     - name: Deploy to Azure Web App
+  #       uses: azure/webapps-deploy@v2 # Gunakan v2 untuk publish-profile, atau v3 juga mendukung
+  #       id: deploy-to-webapp
+  #       with:
+  #         app-name: ${{ env.AZURE_WEBAPP_NAME }}
+  #         slot-name: 'Production'
+  #         package: './release.zip'
+  #         # TAMBAHKAN BARIS INI UNTUK MENGGUNAKAN PUBLISH PROFILE
+  #         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
