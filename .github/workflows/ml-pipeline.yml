@@ -3,9 +3,9 @@ name: ML Pipeline
 on:
   workflow_dispatch:  
   push:
-    branches: [ master ] 
+    branches: [ webadded ] 
 env:
-  AZURE_WEBAPP_NAME: electricity-forecasting-market
+  AZURE_WEBAPP_NAME: electricity-market-forecasting
 
 jobs:
   ml-lifecycle:
@@ -45,46 +45,72 @@ jobs:
           
       - name: Prepare Deployment Package
         run: |
-          # Buat direktori 'publish' jika belum ada
+          # Buat direktori 'publish' jika belum ada untuk mengumpulkan semua file yang diperlukan
           mkdir -p ./publish/data/forecasts/
           mkdir -p ./publish/artifacts/metrics/
           mkdir -p ./publish/artifacts/models/ # Untuk model yang sudah dilatih
-          mkdir -p ./publish/templates/ # Untuk template HTML
-          mkdir -p ./publish/static/
-          # Salin semua file aplikasi yang diperlukan ke direktori 'publish'
-          # Sesuaikan daftar file/folder ini dengan struktur proyek Anda
+          mkdir -p ./publish/templates/ # Untuk template HTML (misal: untuk Flask/Django)
+          mkdir -p ./publish/static/ # Untuk file statis (CSS, JS, gambar)
+
+          # Salin semua file aplikasi dan model yang diperlukan ke direktori 'publish'
+          # Sesuaikan daftar file/folder ini dengan struktur proyek Python Anda
           cp app.py ./publish/
-          cp requirements.txt ./publish/
+          cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
           cp -r templates/ ./publish/
           cp -r static/ ./publish/
-          cp trained_model.pkl ./publish/ # Contoh: salin model yang dilatih
-          # ... tambahkan file/folder lain yang dibutuhkan App Service Anda
+          # Salin model yang sudah dilatih (asumsi 'trained_model.pkl' dibuat oleh 'modelling.py')
+          cp -r model/ ./publish/
+
+          # Kompres seluruh isi direktori 'publish' menjadi satu file .zip
+          # Masuk ke direktori 'publish' terlebih dahulu agar isi zip berada langsung di root-nya.
+          cd publish
+          zip -r ../release.zip .
+          cd .. # Kembali ke direktori root repository
 
       - name: Upload Application Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: webapp-package
-          path: ./publish 
-    
+          # Nama artifact yang akan diunduh oleh job 'deploy'
+          name: python-app
+          # Path ke file .zip yang baru saja dibuat
+          path: release.zip
+
   deploy:
-    name: Deploy to Azure
     runs-on: ubuntu-latest
+    # Job 'deploy' bergantung pada keberhasilan job 'ml-lifecycle'
     needs: [ml-lifecycle]
-
+    environment:
+      # Mendefinisikan environment untuk deployment, berguna untuk proteksi dan URL preview
+      name: 'Production'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+    permissions:
+      # Diperlukan untuk meminta JWT (JSON Web Token) jika menggunakan OIDC untuk autentikasi.
+      id-token: write
     steps:
-        - uses: actions/checkout@v4
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          # Mengunduh artifact 'python-app' yang diunggah oleh job 'ml-lifecycle'
+          name: python-app
+          # File akan diunduh ke direktori kerja saat ini (yaitu './release.zip')
 
-        - name: Download artifact
-          uses: actions/download-artifact@v4
-          with:
-            name: webapp-package 
-            path: ./downloaded-package
+      - name: Verify downloaded artifact
+        run: ls # Untuk memverifikasi bahwa 'release.zip' ada setelah diunduh
 
-        - name: Deploy to Azure Web App
-          uses: azure/webapps-deploy@v2
-          with:
-            app-name: ${{ env.AZURE_WEBAPP_NAME }}
-            publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-            package: ./downloaded-package
-      
-      
+      # Langkah unzip ini mungkin tidak selalu diperlukan karena 'azure/webapps-deploy'
+      # action biasanya dapat langsung menerima file .zip sebagai input 'package'.
+      # Namun, kami menyertakannya sesuai dengan contoh yang Anda berikan.
+      # Jika 'package' diharapkan menunjuk ke folder yang tidak di-zip,
+      # maka 'unzip' diperlukan dan 'package' harus diubah ke path folder yang tidak di-zip.
+      - name: Unzip artifact for deployment
+        run: unzip release.zip
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2 # Gunakan v2 untuk publish-profile, atau v3 juga mendukung
+        id: deploy-to-webapp
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          slot-name: 'Production'
+          package: './release.zip'
+          # TAMBAHKAN BARIS INI UNTUK MENGGUNAKAN PUBLISH PROFILE
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}

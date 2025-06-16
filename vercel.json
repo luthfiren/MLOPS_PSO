@@ -1,0 +1,42 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      // Menentukan bahwa 'app.py' adalah file yang akan dibangun sebagai fungsi Python.
+      // Karena 'app.py' berada di root, kita targetkan langsung.
+      "src": "app.py",
+      // Menggunakan @vercel/python builder untuk memproses file Python ini.
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      // Mengarahkan semua permintaan masuk ke aplikasi app.py.
+      // "(.*)" adalah regex yang menangkap semua path setelah domain.
+      "src": "/(.*)",
+      // Menentukan bahwa permintaan tersebut akan ditangani oleh fungsi 'app.py'.
+      "dest": "app.py"
+    }
+  ],
+  // Bagian 'functions' ini sangat penting untuk menyertakan folder dan file tambahan
+  // yang dibutuhkan oleh 'app.py' saat berjalan sebagai serverless function.
+  "functions": {
+    // Mengacu pada fungsi yang dibangun dari 'app.py'.
+    "app.py": {
+      "includeFiles": [
+        // Menyertakan seluruh folder 'model' dan semua isinya.
+        // Ini penting untuk model ML dan skrip terkait.
+        "model/**",
+        // Menyertakan seluruh folder 'static' dan semua isinya.
+        // Ini untuk aset-aset web seperti CSS, JavaScript, gambar.
+        "static/**",
+        // Menyertakan seluruh folder 'templates' dan semua isinya.
+        // Ini untuk template HTML yang akan dirender oleh Flask.
+        "templates/**",
+        // Menyertakan file 'requirement.txt'.
+        // Meskipun Vercel biasanya mendeteksinya, menyertakannya secara eksplisit bisa membantu.
+        "requirement.txt"
+      ]
+    }
+  }
+}
