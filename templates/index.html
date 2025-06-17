@@ -48,6 +48,37 @@
             {% endif %}
             <p class="card-description">Memantau durasi eksekusi pipeline ML kami untuk memastikan prediksi dapat dihasilkan dan ter-deploy tepat waktu setiap hari.</p>
         </section>
+
+        <!-- Prediction Trigger Butto -->
+        <section class="dashboard-card" style="margin-top: 40px; text-align: center; clear: both;">
+            <h2>Generate New Prediction</h2>
+            <button id="predict-button" onclick="triggerPrediction()"
+                    style="background-color: #007BFF; color: white; padding: 14px 28px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer;">
+                Run Prediction
+            </button>
+            <p id="predict-status" style="margin-top: 10px; color: #333; font-weight: 500;"></p>
+        </section>
+
+        <script>
+        function triggerPrediction() {
+            const statusElement = document.getElementById('predict-status');
+            statusElement.textContent = 'Processing prediction...';
+
+            fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})  // Add feature payload here later
+            })
+            .then(response => response.json())
+            .then(data => {
+                statusElement.textContent = data.message || 'Prediction completed.';
+            })
+            .catch(error => {
+                statusElement.textContent = 'Error during prediction: ' + error;
+            });
+        }
+        </script>
+
     </main>
 
     <footer>

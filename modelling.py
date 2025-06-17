@@ -1,663 +1,339 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import kendalltau
-from statsmodels.tsa.stattools import acf
-from scipy.signal import argrelextrema
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error
-from sklearn.linear_model import LinearRegression
-from sklearn.dummy import DummyRegressor # For a simpler baseline
-from statsmodels.tsa.seasonal import seasonal_decompose
-from statsmodels.tsa.stattools import adfuller
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing, Holt
-from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer, GroupNormalizer, QuantileLoss
-from lightning.pytorch import Trainer
-from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from pytorch_lightning.loggers import TensorBoardLogger
-
-import os
 import json
+import os
+import subprocess
+import mlflow
 import joblib
+import tempfile
+import argparse
+from datetime import datetime
 
-# # Step by step
-# inital git repository, create venv, install base dependencies, create requirement.txt, simulate data read and preprocessing, versioned the data
-# training model, save the run, version the model + MLFlow logging
-# Assumption here is your model was saved, then load the .py, define dependencies, create serving scripts (input/output format, preprocessing/post-processing), run locally to start web server, test API to your local host, conatinerize with docker
-# Infrastructure provisioning: setting up necessary compute resources, real-time inference (immediate prediction) use dockerized fastAPI application + scalability configure auto-scaling + load balancing , batch scheduler for making prediction on large dataset (like run_batch_prediction in app/main.py). THE PROCESS ARE scheduler triggers the job, job loads the model, job read the large dataset, perform batch prediction, saves result to data store, streaming inference for continous prediction such as applicatio nconnect to data stream + immediate pre-processed + predict + written to another stream and real-time database
-# Monitor and logging: proper loggin that sends log to centralized logging system, deatils to log such as timestamp request + unique request id + input feature + raw model output + final prediction + any error or wanring + model version used, for data drift detection such as collect statistic such as  mean, variance, quartiles, distribution of incoming prediction data + compare statistics + use statistic test to detect significant, conceptual drift detection such as compare model actual performance and historical performance + analyze prediction confidence + actual outcome, alert CT team such integrate monitoring tools with alert system that triggers from these detection
-# Automated things: singal output for retraining such as these detection + schedule retraining, orchestration by github actions/jenkins + pipeline Data Ingestion: Pull the latest, most relevant data (including new ground truth if available).
-# - Data Validation: Ensure the new data conforms to expected schema and quality.
-# - Data Preprocessing: Apply the same preprocessing steps as the initial training (critical for consistency).
-# - Model Training: Run src/train.py with the updated data.
-# - Model Evaluation: Evaluate the new model against a separate test set and compare its performance to the currently deployed model (the "champion" model).
-# - Model Versioning/Registration: Register the newly trained model in the Model Registry (e.g., MLflow Model Registry) with a new version number and its evaluation metrics.
-# - Model Approval (Optional): Automatic or manual review step to decide if the new model is better than the champion.
-# - Automated Deployment: If the new model is approved, trigger the deployment pipeline (from Phase 3) to replace the old model in production (e.g., using Blue/Green or Canary deployments).
+# --- parse action ---
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run or retrain MLOps pipeline.")
+    parser.add_argument("--mode", choices=["run", "retrain"], default="run", help="Pipeline mode: run or retrain")
+    parser.add_argument("--model-uri", type=str, default="models:/ElectricityForecaster/Production")
+    parser.add_argument("--train-data", type=str, default="processed_data/merged_data.csv")
+    return parser.parse_args()
+
+# --- Dynamic Model Discovery ---
+from model import discover_model_classes
+
+# ------- Tambahan untuk pyfunc wrapper -------
+import mlflow.pyfunc
 
 
-# # Define sMAPE function (robust to zero)
-# def smape(y_true, y_pred):
-#     denominator = (np.abs(y_true) + np.abs(y_pred)) / 2.0
-#     diff = np.abs(y_true - y_pred) / np.where(denominator == 0, 1, denominator)
-#     return 100 * np.mean(diff)
+class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
+    def load_context(self, context):
+        import joblib
+        return joblib.load(context.artifacts["model_path"])
+    def predict(self, context, model_input):
+        model = self.load_context(context)
+        # NOTE: Pastikan signature .predict sesuai model kamu!
+        # Untuk statsmodels/forecasting, sesuaikan jika perlu
+        if hasattr(model, "predict"):
+            # statsforecast/prophet: prediksi biasanya butuh DataFrame, bisa saja perlu tweak di sini
+            return model.predict(model_input)
+        elif hasattr(model, "forecast"):
+            return model.forecast(model_input)
+        else:
+            raise RuntimeError("Model does not support predict/forecast")
 
-# # Baseline: predict y[t+24] = y[t]
-# def naive_forecast_24h(df, target_col='y', horizon=24):
-#     df = df.copy()
-#     df['y_pred'] = df[target_col].shift(horizon)
-#     df = df.dropna(subset=['y', 'y_pred'])
+def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", target_col="value"):
+    df = pd.read_csv(master_data_path)
+    df["ds"] = pd.to_datetime(df["timestamp"])
+    df = df.rename(columns={target_col: 'y'})
+    if 'unique_id' not in df.columns: 
+         df['unique_id'] = 'series_1'
+    # Pastikan tipe kolom benar untuk model time series
+    df["y"] = pd.to_numeric(df["y"], errors='coerce')
+    df["unique_id"] = df["unique_id"].astype(str)
+    df = df.sort_values(by='ds').reset_index(drop=True)
+    total_len = len(df)
+    forecast_horizon = 24
+    val_len = forecast_horizon * 2
+    test_df_for_prediction = df.iloc[-forecast_horizon:]
+    val_df_for_evaluation = df.iloc[-(forecast_horizon + val_len):-forecast_horizon]
+    train_df_for_training = df.iloc[:-(forecast_horizon + val_len)]
+    full_training_df = df.iloc[:-forecast_horizon]
+    return train_df_for_training, val_df_for_evaluation, test_df_for_prediction, full_training_df, df
 
-#     mae = mean_absolute_error(df[target_col], df['y_pred'])
-#     smape_score = smape(df[target_col], df['y_pred'])
-
-#     print(f"24-step MAE: {mae:.4f}")
-#     print(f"24-step sMAPE: {smape_score:.2f}%")
-
-#     return df
-
-# Several testing or measurement on data
-# ===========================
-
-# ====================================================================================================
-# TAMBAHAN: Fungsi untuk menyimpan output
-# ====================================================================================================
-
-def save_forecast_to_csv(forecast_df, file_path="data/forecasts/latest_forecast.csv"):
-    """
-    Menyimpan DataFrame hasil prediksi ke file CSV.
-    Forecast_df harus memiliki kolom 'tanggal_jam' dan 'predicted_price'.
-    """
+def save_forecast_to_csv(forecast_df: pd.DataFrame, master_actuals_df: pd.DataFrame, file_path="data/forecasts/latest_forecast.csv"):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    forecast_df.to_csv(file_path, index=False)
-    print(f"Hasil prediksi disimpan ke: {file_path}")
+    forecast_df_renamed = forecast_df.rename(columns={'yhat': 'predicted_price', 'ds': 'tanggal_jam'})
+    master_actuals_df_renamed = master_actuals_df.rename(columns={'y': 'actual_price', 'ds': 'tanggal_jam'})
+    forecast_df_renamed['tanggal_jam'] = pd.to_datetime(forecast_df_renamed['tanggal_jam']).dt.tz_localize(None)
+    master_actuals_df_renamed['tanggal_jam'] = pd.to_datetime(master_actuals_df_renamed['tanggal_jam']).dt.tz_localize(None)
+    merged_df = pd.merge(
+        forecast_df_renamed,
+        master_actuals_df_renamed[['tanggal_jam', 'actual_price']],
+        on='tanggal_jam',
+        how='left'
+    )
+    final_output_df = merged_df[['tanggal_jam', 'predicted_price', 'actual_price']]
+    final_output_df.to_csv(file_path, index=False)
+    print(f"Hasil prediksi (termasuk aktual yang up-to-date) disimpan ke: {file_path}")
 
 def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metrics.json"):
-    """
-    Menyimpan metrik model ke file JSON.
-    Metrik_dict harus berisi MAE, tanggal pelatihan, dll.
-    """
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    
-    # Tambahkan timestamp saat ini ke metrik
-    metrics_dict['training_date'] = pd.Timestamp.now().isoformat()
-
-    # Baca file yang sudah ada, tambahkan metrik baru, lalu tulis kembali
-    # Ini penting agar dashboard bisa membaca semua riwayat metrik
+    metrics_dict['training_date'] = datetime.now().isoformat()
     all_metrics = []
     if os.path.exists(file_path):
         try:
             with open(file_path, 'r') as f:
                 all_metrics = json.load(f)
-            if not isinstance(all_metrics, list): # Handle case if it's just one dict
+            if not isinstance(all_metrics, list):
                 all_metrics = [all_metrics]
         except json.JSONDecodeError:
-            print(f"Warning: Existing {file_path} is corrupted. Overwriting.")
+            print(f"Warning: Existing {file_path} is corrupted. Starting new metrics list.")
             all_metrics = []
-
     all_metrics.append(metrics_dict)
-    
     with open(file_path, 'w') as f:
         json.dump(all_metrics, f, indent=4)
     print(f"Metrik model disimpan ke: {file_path}")
 
-def save_model_artifact(model, file_path="artifacts/models/sarima_model.joblib"):
-    """
-    Menyimpan objek model yang terlatih.
-    """
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    joblib.dump(model, file_path)
-    print(f"Model disimpan ke: {file_path}")
+def retrain_model(model_uri, train_data_path, target_column='value', experiment_name='RetrainExperiment'):
+    print(f"🚀 Starting retrain with model: {model_uri} and data: {train_data_path}")
 
-#=============================================================================================
+    if model_uri is None:
+        print("⚙️ No existing model URI provided. Running full MLOps pipeline...")
+        run_mlops_pipeline()
+        return
 
-def has_trend(time_series, alpha=0.05):
-    """
-    Check if a time series has a significant trend using the Mann-Kendall test.
-    
-    Parameters:
-    - time_series: List or 1D array of values.
-    - alpha: Significance level (default 0.05).
-    
-    Returns:
-    - (bool) True if trend is detected.
-    """
-    n = len(time_series)
-    x = np.arange(n)
-    tau, p_value = kendalltau(x, time_series)
-    return p_value < alpha
+    # Load model
+    loaded_model = mlflow.pyfunc.load_model(model_uri)
+    model = loaded_model._model_impl.load_context(loaded_model._model_impl._context)
 
-def auto_detect_seasonality(time_series, max_period=48, alpha=0.05, min_peak_prominence=0.1):
-    """
-    Efficiently detect candidate seasonality periods in a time series using ACF.
-    
-    Parameters:
-    - time_series: 1D array-like numeric data.
-    - max_period: max lag to check for seasonality.
-    - alpha: significance level for autocorrelation.
-    - min_peak_prominence: minimum relative height to consider an ACF peak significant.
-    
-    Returns:
-    - List of candidate seasonal periods (lags).
-    """
-    ts = np.asarray(time_series)
-    # Detrend by first differencing
-    ts_diff = np.diff(ts)
-    n = len(ts_diff)
-    
-    # 95% confidence interval for zero autocorrelation
-    conf_interval = 1.96 / np.sqrt(n)
-    
-    # Compute ACF up to max_period with FFT for speed on large data
-    acf_vals = acf(ts_diff, nlags=max_period, fft=True)
-    
-    # Focus only on lags from 2 to max_period
-    lags = np.arange(2, max_period+1)
-    acf_subset = acf_vals[2:max_period+1]
-    
-    # Find local maxima in ACF values (candidate seasonality peaks)
-    local_max_idx = argrelextrema(acf_subset, np.greater)[0]
-    local_max_lags = lags[local_max_idx]
-    local_max_vals = acf_subset[local_max_idx]
-    
-    # Filter peaks that exceed confidence interval and min_peak_prominence
-    candidates = local_max_lags[
-        (np.abs(local_max_vals) > conf_interval) & 
-        (local_max_vals > min_peak_prominence)
-    ]
-    
-    return candidates.tolist()
+    # ⚠️ PROPER SPLIT: Prepare train/val/test properly FIRST
+    train_df, val_df, test_df, _, full_df = load_and_preprocess_data(master_data_path=train_data_path, target_col=target_column)
 
-# MODEL SARIMA
-# =============================
-# FUNGSI PREPROCESSING
-# =============================
-def load_data(file_path):
-    """Memuat data dari CSV dan mengatur timestamp sebagai index."""
-    df = pd.read_csv(file_path)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df.set_index("timestamp", inplace=True)
-    return df
+    # ✅ Train ONLY on train_df
+    X_train = train_df.drop(columns=['ds', 'unique_id', 'y'])
+    y_train = train_df['y']
+    model.fit(X_train, y_train)
 
-def add_time_features(df, target_col):
-    """Menambahkan fitur berbasis waktu (jam, hari, musim)."""
-    df["hour"] = df.index.hour
-    df["day_of_week"] = df.index.dayofweek
-    df["month"] = df.index.month
-    df["season"] = df["month"] % 12 // 3 + 1  # 1=Winter, 2=Spring, 3=Summer, 4=Autumn
-    return df
+    # ✅ Validation
+    X_val = val_df.drop(columns=['ds', 'unique_id', 'y'])
+    y_val_actual = val_df['y']
+    y_val_pred = model.predict(X_val)
+    mae_val = np.mean(np.abs(y_val_actual - y_val_pred))
 
-def check_stationarity(series):
-    """Menguji apakah data stationer menggunakan ADF Test."""
-    result = adfuller(series)
-    print(f'ADF Statistic: {result[0]}')
-    print(f'p-value: {result[1]}')
-    return result[1] < 0.05
+    print(f"📊 MAE on validation set: {mae_val:.4f}")
 
-def apply_differencing(series, d=1, D=0, seasonal_period=24):
-    """Melakukan differencing non-musiman dan musiman."""
-    if d > 0:
-        series = series.diff(d).dropna()
-    if D > 0:
-        series = series.diff(seasonal_period * D).dropna()
-    return series
+    # Load the best previous model MAE from metrics
+    metrics_file = 'artifacts/metrics/model_metrics.json'
+    best_prev_mae = None
+    if os.path.exists(metrics_file):
+        with open(metrics_file, 'r') as f:
+            metrics_data = json.load(f)
+            if metrics_data:
+                metrics_data_sorted = sorted(metrics_data, key=lambda x: x['MAE'])
+                best_prev_mae = metrics_data_sorted[0]['MAE']
+                print(f"📁 Best previous MAE: {best_prev_mae:.4f}")
 
-# =============================
-# FUNGSI MODELING
-# =============================
-def identify_parameters(series, seasonal_period=24, plot=False):
-    """Mengidentifikasi parameter SARIMA berdasarkan ACF/PACF."""
-    if plot:
-        plot_acf(series, lags=40)
-        plot_pacf(series, lags=40)
-        plt.show()
-    
-    # Contoh parameter default (sesuaikan dengan analisis)
-    return (2,1,1), (1,1,1,seasonal_period)
-
-def train_sarima_model(train_data, order, seasonal_order):
-    """Melatih model SARIMA."""
-    model = SARIMAX(train_data, order=order, seasonal_order=seasonal_order)
-    results = model.fit(disp=False)
-    return results
-
-def forecast_sarima(model, steps):
-    """Melakukan prediksi menggunakan model SARIMA."""
-    forecast = model.get_forecast(steps=steps)
-    pred_mean = forecast.predicted_mean
-    pred_ci = forecast.conf_int()
-    return pred_mean, pred_ci
-
-# =============================
-# FUNGSI EVALUASI
-# =============================
-def generate_time_series_folds(df, date_col, n_splits, horizon):
-    df = df.sort_values(by=date_col)
-    fold_size = len(df) // (n_splits + 1)
-    folds = []
-
-    for i in range(n_splits):
-        train = df.iloc[:fold_size * (i + 1)]
-        test = df.iloc[fold_size * (i + 1): fold_size * (i + 1) + horizon]
-        folds.append((train, test))
-
-    return folds
-
-def evaluate_forecast(y_true, y_pred):
-    """Menghitung metrik evaluasi (MAE, RMSE)."""
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-    print(f"MAE: {mae:.4f}, RMSE: {rmse:.4f}")
-    return mae, rmse
-
-def plot_forecast(y_train, y_true, y_pred, pred_ci=None):
-    """Memvisualisasikan hasil forecasting."""
-    plt.figure(figsize=(12,6))
-    plt.plot(y_train[-100:], label="Train")
-    plt.plot(y_true, label="Actual")
-    plt.plot(y_pred, label="Forecast", color="red")
-    if pred_ci is not None:
-        plt.fill_between(pred_ci.index, pred_ci.iloc[:,0], pred_ci.iloc[:,1], color='k', alpha=.2)
-    plt.legend()
-    plt.show()
-
-# =============================
-# FUNGSI UTAMA (PIPELINE)
-# =============================
-def run_sarima_pipeline(train_path, val_path, test_path, target_col="value", seasonal_period=24, forecast_horizon=24):
-    """Pipeline lengkap SARIMA dari data hingga evaluasi."""
-    # Load Data
-    train_df = load_data(train_path)
-    val_df = load_data(val_path)
-    test_df = load_data(test_path)
-    
-    # Tambahkan fitur waktu
-    train_df = add_time_features(train_df, target_col)
-    val_df = add_time_features(val_df, target_col)
-    test_df = add_time_features(test_df, target_col)
-    
-    # Gabungkan data
-    full_training_data = pd.concat([train_df[target_col], val_df[target_col]])
-    
-    # Cek stationeritas
-    series_for_param_id = full_training_data.copy()
-    is_stationary = check_stationarity(series_for_param_id)
-    if not is_stationary:
-        series_for_param_id = apply_differencing(series_for_param_id, d=1, D=1, seasonal_period=seasonal_period)
-    
-    # Identifikasi parameter
-    order, seasonal_order = identify_parameters(series_for_param_id, seasonal_period)
-    
-    # Train model
-    final_model = train_sarima_model(full_training_data, order, seasonal_order)
-    
-    # jika test_df adalah data aktual untuk evaluasi
-    if target_col in test_df.columns:
-        # Lakukan prediksi untuk evaluasi performa pada `test_df`
-        test_pred_series, test_ci = forecast_sarima(final_model, len(test_df))
-        print("Test Metrics:")
-        test_mae, test_rmse = evaluate_forecast(test_df[target_col], test_pred_series)
-        forecast_output_df = pd.DataFrame({
-            'tanggal_jam': test_pred_series.index,
-            'predicted_price': test_pred_series.values
-        })
-    
-    # Tambahkan kolom aktual untuk perbandingan (untuk kebutuhan dashboard/backtesting)
-        # Ini penting agar plot 'Prediksi vs Aktual' di dashboard bisa dibuat
-        # Perlu dipastikan test_df memiliki kolom actual_price atau target_col
-        forecast_output_df['actual_price'] = test_df[target_col].values
-
-
-    # Simpan hasil prediksi
-        save_forecast_to_csv(forecast_output_df, "data/forecasts/latest_forecast.csv")
-
-        # Simpan metrik
-        metrics = {
-            "model_name": "SARIMA",
-            "MAE": test_mae,
-            "RMSE": test_rmse,
-            "forecast_horizon": len(test_pred_series),
-            "order": order,
-            "seasonal_order": seasonal_order
-        }
-        save_metrics_to_json(metrics, "artifacts/metrics/sarima_metrics.json")
-    
-    # Jika `test_df` dimaksudkan sebagai data *masa depan tanpa aktual*:
+    # Compare and decide promotion
+    if best_prev_mae is None or mae_val < best_prev_mae:
+        print("✅ New retrained model is better. Running full MLOps pipeline to promote...")
+        run_mlops_pipeline()
     else:
-        # Buat index waktu untuk horizon prediksi yang sesungguhnya (misalnya, 24 jam ke depan)
-        last_timestamp_in_training = full_training_data.index[-1]
-        future_index = pd.date_range(start=last_timestamp_in_training + pd.Timedelta(hours=1), 
-                                     periods=forecast_horizon, 
-                                     freq='H') # Sesuaikan frekuensi ('H' untuk jam, 'D' untuk hari, dll.)
+        print("⚠️ Retrained model is not better. Generating forecast anyway for monitoring...")
+        forecast_result_df = model.predict(test_df.drop(columns=['ds', 'unique_id', 'y']))
+        forecast_df = pd.DataFrame({'ds': test_df['ds'], 'yhat': forecast_result_df})
+        save_forecast_to_csv(forecast_df, full_df, "data/forecasts/latest_forecast.csv")
 
-        future_pred_series, future_ci = forecast_sarima(final_model, forecast_horizon)
-        
-        # Pastikan index prediksi sesuai dengan future_index yang dibuat
-        future_pred_series.index = future_index
-        future_ci.index = future_index
+    # 📦 Always log retrained model + metrics to MLflow (under 'LatestRetrainAttempt')
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(run_name=f"LatestRetrain-{datetime.now().isoformat()}") as run:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = f"{tmpdir}/model.pkl"
+            joblib.dump(model, model_path)
 
-        forecast_output_df = pd.DataFrame({
-            'tanggal_jam': future_pred_series.index,
-            'predicted_price': future_pred_series.values
-        })
-        
-        # Karena tidak ada aktual, kolom 'actual_price' akan diisi NaN atau tidak ada
-        # Untuk tujuan dashboard "prediksi vs aktual", Anda harus menyertakan file historical_actuals.csv terpisah
-        # seperti yang saya sebutkan di balasan sebelumnya.
-
-        save_forecast_to_csv(forecast_output_df, "data/forecasts/latest_forecast_future.csv")
-
-        # Metrik dihitung dari validasi/uji, bukan dari prediksi masa depan
-        val_pred_series, _ = forecast_sarima(final_model, len(val_df)) # Lakukan lagi prediksi untuk validasi
-        val_mae, val_rmse = evaluate_forecast(val_df[target_col], val_pred_series)
-
-        metrics = {
-            "model_name": "SARIMA",
-            "MAE_validation": val_mae,
-            "RMSE_validation": val_rmse,
-            "forecast_horizon": forecast_horizon, # Horizon prediksi yang disimpan
-            "order": order,
-            "seasonal_order": seasonal_order
-        }
-        save_metrics_to_json(metrics, "artifacts/metrics/sarima_metrics.json")
-
-    # Simpan model untuk deployment
-    save_model_artifact(final_model, "artifacts/models/sarima_model.joblib")
-    
-    return final_model
-        
-# # Model ES (Simple Exponential)
-class ExponentialSmoothingSelector:
-    def __init__(self, time_series, has_trend=False, seasonal_periods=None, seasonal_type='add'):
-        self.time_series = np.asarray(time_series)
-        self.has_trend = has_trend
-        self.seasonal_periods = seasonal_periods
-        self.seasonal_type = seasonal_type
-
-        # Internal storage
-        self.models = {}
-        self.evaluations = {}
-        self.selected_model_name = None
-        self.best_model = None
-        self.best_forecast = None
-
-    def _train_model(self, model_name, model_cls, **fit_args):
-        try:
-            model = model_cls(self.train_series, **fit_args)
-            fitted = model.fit()
-            forecast = fitted.forecast(self.test_size)
-            metrics = evaluate_forecast(self.test_series, forecast) 
-
-            self.models[model_name] = fitted
-            self.evaluations[model_name] = metrics
-        except Exception as e:
-            print(f"[WARNING] {model_name} failed: {e}")
-
-    def train_and_select(self, test_size=12):
-        self.test_size = test_size
-        self.train_series = self.time_series[:-test_size]
-        self.test_series = self.time_series[-test_size:]
-
-        if not self.has_trend and not self.seasonal_periods:
-            self._train_model("SES", SimpleExpSmoothing)
-        elif self.has_trend and not self.seasonal_periods:
-            self._train_model("Holt", Holt)
-        elif self.seasonal_periods:
-            self._train_model(
-                "Holt-Winters",
-                ExponentialSmoothing,
-                trend='add' if self.has_trend else None,
-                seasonal=self.seasonal_type,
-                seasonal_periods=self.seasonal_periods
+            mlflow.pyfunc.log_model(
+                artifact_path="model",
+                python_model=JoblibModelWrapper(),
+                artifacts={"model_path": model_path},
             )
-        else:
-            raise RuntimeError("Invalid combination of trend and seasonality flags.")
-        
-        if not self.evaluations:
-            raise RuntimeError("No models were successfully trained.")
 
-        sorted_models = sorted(
-            self.evaluations.items(),
-            key=lambda x: (x[1]['MAE'] + x[1]['RMSE']) / 2
+            # Log metrics to MLflow
+            mlflow.log_metric("MAE", mae_val)
+
+            # Log metadata
+            mlflow.set_tag("model_name", "RetrainedModel")
+            mlflow.set_tag("retrain_date", datetime.now().isoformat())
+            mlflow.set_tag("promotion_decision", "promoted" if best_prev_mae is None or mae_val < best_prev_mae else "rejected")
+
+    print("📁 Latest retrained model and metrics logged to MLflow for audit.")
+                                    
+def run_mlops_pipeline(
+    master_data_path="processed_data/merged_data.csv",
+    forecast_horizon=24,
+    season_list=[6, 12, 24]
+):
+    print("Memulai MLOps Pipeline (otomatis model discovery)...")
+    with mlflow.start_run(run_name="Full_MLOps_Pipeline_Run") as pipeline_run:
+        mlflow.log_param("pipeline_start_time", datetime.now().isoformat())
+        mlflow.log_param("forecast_horizon", forecast_horizon)
+        
+        # 1. Load dan Preprocess Data
+        print("Memuat dan memproses data...")
+        train_df, val_df, test_df_for_prediction, full_training_df, master_df_full = \
+            load_and_preprocess_data(master_data_path)
+        
+        mlflow.log_param("master_data_rows", len(master_df_full))
+        mlflow.log_param("train_data_rows", len(train_df))
+        mlflow.log_param("val_data_rows", len(val_df))
+        mlflow.log_param("test_data_for_prediction_rows", len(test_df_for_prediction))
+
+        # 2. Dynamic Model Discovery & Optimasi
+        print("Mencari dan mengoptimasi seluruh model di folder /model...")
+        all_model_classes = discover_model_classes()
+        print(f"Model ditemukan: {list(all_model_classes.keys())}")
+
+        best_models_info = []
+        for model_name, ModelCls in all_model_classes.items():
+            print(f"\nOptimasi: {model_name}")
+            try:
+                # Buat instance model dengan parameter default (bisa dikembangkan jadi configurable)
+                model_instance = ModelCls(forecast_horizon=forecast_horizon)
+                # Pastikan signature optimize konsisten antar model!
+                best_mae, best_params, best_model_obj, run_id = model_instance.optimize(
+                    df=full_training_df, 
+                    forecast_horizon=forecast_horizon,
+                    season_list=season_list
+                )
+                best_models_info.append({
+                    "name": model_name,
+                    "mae": best_mae,
+                    "params": best_params,
+                    "model": best_model_obj,
+                    "run_id": run_id,
+                    "artifact_path": getattr(model_instance, "mlflow_artifact_path", f"champion_{model_name.lower()}"),
+                })
+                mlflow.log_metric(f"{model_name}_best_mae", best_mae)
+                mlflow.log_param(f"{model_name}_run_id", run_id)
+            except Exception as e:
+                print(f"Model {model_name} gagal dioptimasi: {e}")
+
+        # 3. Pilih Model Terbaik
+        overall_best = None
+        for info in best_models_info:
+            if overall_best is None or (info["mae"] is not None and info["mae"] < overall_best["mae"]):
+                overall_best = info
+
+        if overall_best is None:
+            print("Peringatan: Tidak ada model yang berhasil dioptimasi atau tidak ada model terbaik ditemukan.")
+            mlflow.log_param("status", "No_Best_Model_Found")
+            return
+
+        print(f"Model terbaik secara keseluruhan: {overall_best['name']} dengan MAE Validasi: {overall_best['mae']:.4f}")
+        mlflow.log_param("overall_best_model_name", overall_best['name'])
+        mlflow.log_metric("overall_best_validation_mae", overall_best['mae'])
+        mlflow.log_param("overall_best_model_run_id", overall_best['run_id'])
+
+        # 4. Log model ke MLflow sebagai pyfunc, lalu register ke Model Registry
+        print(f"Mendaftarkan model '{overall_best['name']}' ke MLflow Model Registry...")
+
+        # ----------- MODIFIKASI DI SINI -----------
+        # Log model dengan pyfunc log_model
+        model_file_path = str(overall_best['model'].model_file)
+
+        mlflow.pyfunc.log_model(
+            artifact_path=overall_best['artifact_path'],
+            python_model=JoblibModelWrapper(),
+            artifacts={"model_path": model_file_path}
         )
-        
-        self.selected_model_name = sorted_models[0][0]
-        self.best_model = self.models[self.selected_model_name]
-        self.best_forecast = self.best_model.forecast(test_size)
 
-        return {
-            'selected_model': self.selected_model_name,
-            'best_forecast': self.best_forecast,
-            'MAE': self.evaluations[self.selected_model_name]['MAE'],
-            'RMSE': self.evaluations[self.selected_model_name]['RMSE']
+        run_id = mlflow.active_run().info.run_id
+        model_uri_to_register = f"runs:/{run_id}/{overall_best['artifact_path']}"
+        mlflow.register_model(
+            model_uri=model_uri_to_register,
+            name="ElectricityForecaster",
+            tags={"project": "MLOps_Finland_Electricity", "source_pipeline_run": pipeline_run.info.run_id}
+        )
+        print(f"Model '{overall_best['name']}' versi terbaru didaftarkan sebagai 'ElectricityForecaster' di MLflow Model Registry.")
+
+        # 5. Forecasting & Simpan Hasil
+        print("Melakukan forecasting dan menyimpan hasil untuk dashboard...")
+        last_train_timestamp = full_training_df['ds'].max()
+        future_dates = pd.date_range(
+            start=last_train_timestamp + pd.Timedelta(hours=1), 
+            periods=forecast_horizon, 
+            freq='H'
+        )
+        future_input_df = pd.DataFrame({'ds': future_dates})
+        if 'unique_id' in full_training_df.columns:
+            future_input_df['unique_id'] = full_training_df['unique_id'].iloc[0]
+        future_input_df['y'] = np.nan
+
+        try:
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/Production")
+            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Production Stage).")
+        except Exception as e:
+            print(f"Gagal memuat model Production: {e}. Mencoba memuat versi terbaru yang terdaftar.")
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/latest")
+            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Versi Terbaru).")
+
+        forecast_result_df = loaded_forecaster.predict(future_input_df)
+        save_forecast_to_csv(forecast_result_df, master_df_full, "data/forecasts/latest_forecast.csv")
+
+        final_metrics_for_dashboard = {
+            "model_name": overall_best["name"],
+            "MAE": overall_best["mae"],
+            "forecast_horizon": forecast_horizon,
+            "best_params": overall_best["params"]
         }
-
-    def get_all_evaluations(self):
-        return self.evaluations
-
-
-# # MODEL TFT
-def add_time_idx(df, time_col="endTime"):
-    df[time_col] = pd.to_datetime(df[time_col])
-    df = df.sort_values(by=time_col).reset_index(drop=True)
-    df["time_idx"] = np.arange(len(df))
-    return df
-
-def add_group_column(df):
-    df["group"] = "series_1"
-    return df
-
-def create_datasets(train_long, val_long, test_long, 
-                    time_idx="time_idx", group_col="group", target_col="value",
-                    max_encoder_length=24, max_prediction_length=6):
-    train_dataset = TimeSeriesDataSet(
-        train_long,
-        time_idx=time_idx,
-        target=target_col,
-        group_ids=[group_col],
-        max_encoder_length=max_encoder_length,
-        max_prediction_length=max_prediction_length,
-        time_varying_known_reals=[time_idx],
-        time_varying_unknown_reals=[target_col],
-        target_normalizer=GroupNormalizer(groups=[group_col]),
-        add_relative_time_idx=True,
-        add_target_scales=True,
-        add_encoder_length=True,
-    )
-
-    val_dataset = TimeSeriesDataSet.from_dataset(train_dataset, val_long, predict=False, stop_randomization=True)
-    test_dataset_pred = TimeSeriesDataSet.from_dataset(train_dataset, test_long, predict=True, stop_randomization=True)
-
-    return train_dataset, val_dataset, test_dataset_pred
-
-
-def create_dataloaders(train_dataset, val_dataset, test_dataset_pred, batch_size=64):
-    train_dataloader = train_dataset.to_dataloader(train=True, batch_size=batch_size, num_workers=0)
-    val_dataloader = val_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
-    test_dataloader_pred = test_dataset_pred.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
-
-    return train_dataloader, val_dataloader, test_dataloader_pred
-
-
-def build_model(train_dataset, dataTrain_loaders, dataVal_loaders):
-    """Instantiate TFT model and trainer."""
-    
-    # assuming you have train_dataloader and val_dataloader
-    model = TemporalFusionTransformer.from_dataset(
-        train_dataset,
-        learning_rate=0.03,
-        hidden_size=32,
-        attention_head_size=1,
-        dropout=0.1,
-        hidden_continuous_size=16,
-        loss=QuantileLoss(),
-        log_interval=2,
-        reduce_on_plateau_patience=4,
-    )
-    
-    # Set up callbacks and logger
-    logger = TensorBoardLogger("lightning_logs")
-
-    trainer = Trainer(
-        max_epochs=10,
-        gradient_clip_val=0.1,
-        logger=logger,
-    )
-
-    # use model.fit instead of passing only model
-    trainer.fit(
-        model,
-        train_dataloaders=dataTrain_loaders,
-        val_dataloaders=dataVal_loaders
-    )
-
-    return model, trainer
-
-
-def train_model(trainer, model, train_dataloader, val_dataloader):
-    """Train the TFT model."""
-    trainer.fit(model, train_dataloader, val_dataloader)
-
-
-def evaluate_model(model, test_dataloader):
-    """Evaluate the TFT model and return MAE, RMSE."""    
-    # Predict
-    output = model.predict(test_dataloader, mode="raw", return_x=True)
-
-    # Unpack what we need
-    raw_predictions = output[0]
-    x = output[1]
-
-    # Extract true and predicted values
-    y_true = x["decoder_target"].cpu().numpy().squeeze().flatten()
-    
-    # Extract the actual prediction tensor
-    y_pred_tensor = raw_predictions.prediction  # This is the tensor with predictions
-
-    # Now convert to numpy
-    y_pred = y_pred_tensor.detach().cpu().numpy()[:, :, 0].flatten()
-    
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-    print(f"Test MAE: {mae:.4f}, RMSE: {rmse:.4f}")
-    return mae, rmse
-
-# from model import ThetaModel
-# from sklearn.model_selection import TimeSeriesSplit
-# import time
-
-# def univariate_configuration(train, val, id_value='series_1'):
-#     univariate_col = ['endTime', 'value']
-#     rename_map = {'endTime': 'ds', 'value': 'y'}
-    
-#     def prepare_df(df):
-#         return df.loc[:, univariate_col].rename(columns=rename_map).assign(unique_id=id_value)
-    
-#     df_train = prepare_df(train)
-#     df_validation = prepare_df(val)
-    
-#     return df_train, df_validation
-
-# # 🧪 Example Usage
-# if __name__ == "__main__":
-#     # Define base path
-#     base_dir = os.path.join(os.path.dirname(__file__), 'processed_data')
-
-#     # File paths
-#     train_path = os.path.join(base_dir, 'train.csv')
-#     val_path = os.path.join(base_dir, 'val.csv')
-#     test_path = os.path.join(base_dir, 'test.csv') # hapus kalau sudah integrasi
-#     prediction_path = os.path.join(base_dir, 'test.csv')
-
-#     # Read CSV files
-#     train_df = pd.read_csv(train_path, sep=',')
-#     val_df = pd.read_csv(val_path, sep=',')
-#     test_df = pd.read_csv(test_path, sep=',') # hapus kalau sudah integrasi
-#     prediction_df = pd.read_csv(test_path, sep=',')
-#     prediction_df = prediction_df[['endTime', 'value']]
-#     prediction_df['value'] = 0
-    
-#     # Univariate Configuration
-#     univariate_train_df, univariate_val_df = univariate_configuration(train_df, val_df)
-#     print(univariate_train_df.columns, 'val', univariate_val_df.columns)
-    
-#     # Assuming df is your DataFrame with 'ds' and 'y'
-#     tscv = TimeSeriesSplit(n_splits=5)
-
-#     # Split now contains 5 tuples of (train_df, test_df)
-#     splits = []
-#     for train_idx, test_idx in tscv.split(univariate_train_df):
-#         train_split = univariate_train_df.iloc[train_idx]
-#         test_split = univariate_train_df.iloc[test_idx]
-#         splits.append((train_split, test_split))
-            
-#     theta_model = ThetaModel()
-#     theta_mae = theta_model.train_with_fold(folds=splits)
-#     print(theta_mae)
-    
-    # Check sesonality and trend
-    # trend_status = has_trend(time_series=train_df['value'])
-    # sesonality_list = auto_detect_seasonality(time_series=train_df['value'])
-    
-    # print(trend_status, auto_detect_seasonality)
+        save_metrics_to_json(final_metrics_for_dashboard, "artifacts/metrics/model_metrics.json")
         
-    ######## Ngebuat model wajib yang bisa di fit, predict, dan saved ke joblib. MAKE SURE parameter bisa diganti2 contoh theta bisa diganti jadi forecast_horizon=48
-    
-    # # ======= TFT =========
-    # train_df_tft = add_time_idx(train_df.copy())
-    # val_df_tft = add_time_idx(val_df.copy())
-    # test_df_tft = add_time_idx(test_df.copy())
-    
-    # train_df_tft = add_group_column(train_df_tft)
-    # val_df_tft = add_group_column(val_df_tft)
-    # test_df_tft = add_group_column(test_df_tft)
+        mlflow.log_param("pipeline_end_time", datetime.now().isoformat())
+        print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
 
-    # train_ds, val_ds, test_ds_pred = create_datasets(train_df_tft, val_df_tft, test_df_tft)
-    # train_dl, val_dl, test_dl_pred = create_dataloaders(train_ds, val_ds, test_ds_pred)
+def start_mlflow_server(
+    port=5000,
+    postgres_user="mlflow_user",
+    postgres_password="mlflow_pass",
+    postgres_host="localhost",
+    postgres_port=5432,
+    postgres_db="mlflow_db",
+    artifact_root="./mlruns"
+):
+    backend_uri = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}:{postgres_port}/{postgres_db}"
 
-    # # Train
-    # model, trainer = build_model(train_ds, train_dl, val_dl)
-    # train_model(trainer, model, train_dl, val_dl)
+    cmd = [
+        "mlflow", "server",
+        "--host", "0.0.0.0",
+        "--port", str(port),
+        "--backend-store-uri", backend_uri,
+        "--default-artifact-root", artifact_root,
+    ]
 
-    # # Evaluate on val set (which has targets)
-    # val_mae, val_rmse = evaluate_model(model, val_dl)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
+    print(f"MLflow server started at http://0.0.0.0:{port} with PID {proc.pid}")
+    print(f"Backend URI: {backend_uri}")
+    return proc
 
-    # # Predict on the real test set (no targets)
-    # predictions = model.predict(test_dl_pred)
-
-    # # ======= ARIMA =========
-    # # Jalankan pipeline
-    # model = run_sarima_pipeline(train_path, val_path, test_path, target_col="valuex", seasonal_period=24)
-    
-    # # # Simpan model
-    # # model.save("models/sarima_final.pkl")
-    
-    # ======= Exponential Semoothing =========
-    # selector = ExponentialSmoothingSelector(time_series=train_df.copy(), has_trend=trend_status, seasonal_periods=sesonality_list)
-
-    # =============================
-# Main execution block
-# =============================
 if __name__ == "__main__":
-    # Path ke data Anda (sesuaikan dengan lokasi file Anda)
-    train_data_path = 'processed_data/train.csv' # Contoh
-    val_data_path = 'processed_data/val.csv'     # Contoh
-    test_data_path = 'processed_data/test.csv'   # Contoh (bisa jadi data yang ingin diprediksi masa depan atau data uji aktual)
-    
-    # Pastikan file data Anda memiliki kolom 'timestamp' dan 'value' (atau target_col Anda)
-    # Jika test_data_path adalah data *masa depan* tanpa aktual, pastikan itu sesuai.
+    args = parse_args()
+    proc = start_mlflow_server()
+    mlflow.set_tracking_uri("http://localhost:5000")
 
-    # Menjalankan pipeline SARIMA
-    print("Running SARIMA Pipeline...")
-    final_sarima_model = run_sarima_pipeline(
-        train_path=train_data_path,
-        val_path=val_data_path,
-        test_path=test_data_path,
-        target_col="value", # Sesuaikan dengan nama kolom target Anda
-        seasonal_period=24,  # Sesuaikan dengan perioda musiman data Anda (misalnya 24 jam)
-        forecast_horizon=24 # Berapa jam ke depan Anda ingin memprediksi
-    )
-    print("SARIMA Pipeline Finished.")
+    os.makedirs('data', exist_ok=True)
+    os.makedirs('data/forecasts', exist_ok=True)
+    os.makedirs('artifacts/metrics', exist_ok=True)
+    os.makedirs('artifacts/models', exist_ok=True)
+    os.makedirs('artifacts', exist_ok=True)
+    
+    master_data_path = 'processed_data/merged_data.csv'
+    
+    if not os.path.exists(master_data_path):
+        print("Creating dummy master_electricity_prices.csv...")
+        pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=200, freq='H'),
+            'value': np.random.rand(200) * 100,
+            'unique_id': 'series_1'
+        }).to_csv(master_data_path, index=False)
+
+    if args.mode == "retrain":
+        retrain_model(model_uri=args.model_uri, train_data_path=args.train_data)
+    else:
+        run_mlops_pipeline(master_data_path=args.train_data, forecast_horizon=24)

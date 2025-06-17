@@ -10,28 +10,49 @@ from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing
 from sklearn.metrics import mean_absolute_error
 from pathlib import Path
 
-MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(MODEL_DIR, 'training.log')
-CHAMPION_SCORE = os.path.join(MODEL_DIR, 'champion_score.txt')
-CHAMPION_CONFIG = os.path.join(MODEL_DIR, 'champion_config.json')
-CHAMPION_MODEL = os.path.join(MODEL_DIR, 'champion_model.joblib')
+from model.base_model import BaseForecastModel
 
-# Model ES (Simple Exponential)
-class ExponentialSmoothingModel:
-    def __init__(self, has_trend=False, seasonal_periods=12, seasonal_type='add', forecast_horizon=24, damped_trend=False, trend_type=None):
+class ExponentialSmoothingModel(BaseForecastModel):
+    def __init__(
+        self,
+        has_trend=False,
+        seasonal_periods=12,
+        seasonal_type='add',
+        forecast_horizon=24,
+        damped_trend=False,
+        trend_type=None,
+        season_list=None,
+        **kwargs
+    ):
         self.has_trend = has_trend
-        self.seasonal_periods = seasonal_periods  # or some default
+        self.seasonal_periods = seasonal_periods
         self.seasonal_type = seasonal_type
         self.forecast_horizon = forecast_horizon
         self.damped_trend = damped_trend
         self.trend_type = trend_type
+        self.season_list = season_list
         self.model = None
-        self.model_name = 'Exponential Smoothing Model'
+        self.model_name = 'ExponentialSmoothingModel'
+
+        self.model_dir = Path(__file__).parent
+        self.log_file = self.model_dir / "training.log"
+        self.champion_score_file = self.model_dir / "champion_score.txt"
+        self.champion_config_file = self.model_dir / "champion_config.json"
+        self.model_file = self.model_dir / f"{self.model_name}_champion.joblib"
+        self.mlflow_artifact_path = "champion_exponentialsmoothingmodel"
+
         self.logger = self._setup_logger()
-        self.params = 'baseline'
+        self.params = {
+            "has_trend": self.has_trend,
+            "seasonal_periods": self.seasonal_periods,
+            "seasonal_type": self.seasonal_type,
+            "forecast_horizon": self.forecast_horizon,
+            "damped_trend": self.damped_trend,
+            "trend_type": self.trend_type,
+        }
 
     def _setup_logger(self):
-        log_path = Path(__file__).parent / "training.log"
+        log_path = self.log_file
         logger = logging.getLogger(self.model_name)
         handler = logging.FileHandler(log_path, mode='a')
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(message)s')
@@ -40,10 +61,9 @@ class ExponentialSmoothingModel:
             logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         return logger
-  
+
     def train_with_fold(self, folds, optimizing=False):
         self.folds_to_train = folds
-        
         start_time = time.time()
         scores = []
         model_smoothing_name = None
@@ -61,9 +81,9 @@ class ExponentialSmoothingModel:
                 model_smoothing_name = "Holt"
             elif self.seasonal_periods:
                 model = ExponentialSmoothing(
-                    train_series, 
-                    trend='add' if self.has_trend else None, 
-                    seasonal=self.seasonal_type, 
+                    train_series,
+                    trend='add' if self.has_trend else None,
+                    seasonal=self.seasonal_type,
                     seasonal_periods=self.seasonal_periods
                 ).fit(optimized=True)
                 model_smoothing_name = "ExponentialSmoothing"
@@ -73,75 +93,73 @@ class ExponentialSmoothingModel:
             self.model = model
             forecast = model.forecast(len(test_series))
 
-            # Ensure index/DS alignment if needed
+            test_df = test_df.copy()
             test_df.loc[:, 'ds'] = pd.to_datetime(test_df['ds']).dt.tz_localize(None)
-            actual = test_df[test_df['ds'].isin(test_df['ds'])]['y'].values
+            actual = test_df['y'].values
 
             score = mean_absolute_error(actual, forecast)
             scores.append(score)
 
         avg_score = np.mean(scores)
         elapsed_time = time.time() - start_time
-        
-        if optimizing == False:
+
+        if not optimizing:
             self.model_name = model_smoothing_name
             self.logger.info(f"{self.model_name} Average MAE across {len(folds)} folds = {avg_score:.4f}, Training Time = {elapsed_time:.2f} seconds")
-        
-        return avg_score        
+
+        return avg_score
 
     def predict(self, pred_df, h=None):
+        if self.model is None:
+            raise RuntimeError("Model has not been trained yet.")
         if h is None:
             h = pred_df.shape[0]
 
-        # Generate forecast values
         forecast_values = self.model.forecast(steps=h)
-
-        # Assign 'yhat' as a new column in val_df
-        preds_df = pred_df.copy()  # to avoid modifying the original df outside
-        preds_df.loc[:h-1, "y"] = forecast_values.astype(preds_df["y"].dtype)
-
+        preds_df = pred_df.copy()
+        preds_df = preds_df.iloc[:h].copy()
+        preds_df["yhat"] = forecast_values.astype(float)
         return preds_df
 
     def evaluate(self, actual_df: pd.DataFrame, forecast_df: pd.DataFrame):
         merged = actual_df.merge(forecast_df, on=["unique_id", "ds"])
         score = mean_absolute_error(merged["y"], merged["yhat"])
-        self.logger.info(f"{self.model_name} MAE={score:.4f} with season_length={self.season_length}, horizon={self.forecast_horizon}")
+        self.logger.info(f"{self.model_name} MAE={score:.4f} with horizon={self.forecast_horizon}")
         return score
-    
-    def save(self, path: str = None):
-        if path is None:
-            path = Path(__file__).parent / "model_champion.joblib"
-        joblib.dump(self.model, path)
-        self.logger.info(f"Saved champion model with params {self.params} to {path}")
+
+    def save(self, model_path=None, config_path=None, score_path=None, score=None):
+        model_path = model_path or self.model_file
+        config_path = config_path or self.champion_config_file
+        score_path = score_path or self.champion_score_file
+
+        joblib.dump(self.model, model_path)
+        with open(config_path, 'w') as f:
+            json.dump(self.params, f, indent=4)
+        if score is not None:
+            with open(score_path, 'w') as f:
+                f.write(str(score))
+        self.logger.info(f"Saved champion model with params {self.params} to {model_path}")
 
     def retrain(self, data: pd.DataFrame):
         self.ds = pd.to_datetime(data['ds'])
         self.time_series = np.asarray(data['y'])
-                
-        with open(CHAMPION_CONFIG, 'r') as f:
+
+        with open(self.champion_config_file, 'r') as f:
             best_config = json.load(f)
-        
-        # Get last key-value pair
+
         if best_config:
             last_key = list(best_config.keys())[-1]
             last_value = best_config[last_key]
-            
+
         champion_model = self.train(self.time_series, **best_config)
-        joblib.dump(champion_model, CHAMPION_MODEL)
-        
+        joblib.dump(champion_model, self.model_file)
         self.logger.info(f"RETRAINED CHAMPION | CONFIG: {best_config}")
         return champion_model
-    
-    def create_folds(self, df, n_splits=3, test_size=24):
-        """
-        Time series split into n_splits folds with fixed test_size,
-        growing training data, and sequential test sets (non-overlapping).
-        Returns list of (train_df, test_df) tuples.
-        """
 
+    def create_folds(self, df, n_splits=3, test_size=24):
         folds = []
         total_points = len(df)
-        step = (total_points - test_size * n_splits) // n_splits  # training expansion step
+        step = (total_points - test_size * n_splits) // n_splits
 
         for i in range(n_splits):
             train_end = step * (i + 1) + test_size * i
@@ -149,7 +167,7 @@ class ExponentialSmoothingModel:
             test_end = test_start + test_size
 
             if test_end > total_points:
-                break  # not enough data for this fold
+                break
 
             train_df = df.iloc[:train_end]
             test_df = df.iloc[test_start:test_end]
@@ -158,7 +176,7 @@ class ExponentialSmoothingModel:
         return folds
 
     def optimize(self, df, forecast_horizon=24, season_list=None):
-        # Fix param names: use 'seasonal_periods' to match constructor
+        # Pastikan signature konsisten dengan pipeline!
         if not self.has_trend and (season_list is None or len(season_list) == 0):
             param_grid = ParameterGrid({
                 "forecast_horizon": [forecast_horizon],
@@ -167,34 +185,36 @@ class ExponentialSmoothingModel:
             param_grid = ParameterGrid({
                 "damped_trend": [True, False],
                 "forecast_horizon": [forecast_horizon],
-                "trend_type": ['add', None],  # Ensure 'trend_type' aligns
+                "trend_type": ['add', None],
             })
         else:
             param_grid = ParameterGrid({
-                "seasonal_periods": season_list,      # <- match constructor
-                "seasonal_type": [None, "add", "mul"],  # <- match constructor
-                "trend_type": [None, "add"],            # <- match constructor
+                "seasonal_periods": season_list,
+                "seasonal_type": [None, "add", "mul"],
+                "trend_type": [None, "add"],
                 "damped_trend": [True, False],
                 "forecast_horizon": [forecast_horizon],
             })
 
         self.params = param_grid
-        
+
         best_score = float('inf')
         best_params = None
         best_model = None
+
+        folds = self.create_folds(df, n_splits=3, test_size=forecast_horizon)
 
         for params in param_grid:
             try:
                 model = self.__class__(
                     has_trend=self.has_trend,
-                    seasonal_periods=params.get("seasonal_periods"),
+                    seasonal_periods=params.get("seasonal_periods", self.seasonal_periods),
                     seasonal_type=params.get("seasonal_type", self.seasonal_type),
                     forecast_horizon=params.get("forecast_horizon", forecast_horizon),
                     damped_trend=params.get("damped_trend", False),
                     trend_type=params.get("trend_type", None),
                 )
-                score = model.train_with_fold(self.folds_to_train, optimizing=True)
+                score = model.train_with_fold(folds, optimizing=True)
 
                 if score < best_score:
                     best_score = score
@@ -202,18 +222,19 @@ class ExponentialSmoothingModel:
                     best_model = model
 
             except Exception as e:
-            #     self.logger.warning(f"Skipping params {params} due to error: {e}")
+                self.logger.warning(f"Skipping params {params} due to error: {e}")
                 continue
 
         if best_model:
-            # Save model
-            joblib.dump(best_model, CHAMPION_MODEL)
-
-            # Save best hyperparameters (config) as JSON
-            with open(CHAMPION_CONFIG, 'w') as f:
-                json.dump(best_params, f, indent=4)
-
-            self.logger.info(f"Champion model and config saved to: {CHAMPION_MODEL}")
-
+            best_model.save(
+                model_path=self.model_file,
+                config_path=self.champion_config_file,
+                score_path=self.champion_score_file,
+                score=best_score,
+            )
+            self.logger.info(f"Champion model and config saved to: {self.model_file}")
+            # Penting: return 4 value untuk pipeline otomatis!
+            return best_score, best_params, best_model, "exp_smoothing_run"
         else:
             self.logger.warning("No model improved the score")
+            return None, None, None, None
