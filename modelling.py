@@ -38,23 +38,29 @@ class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
         if hasattr(model, "predict"):
             sig = inspect.signature(model.predict)
             params = sig.parameters
+            # (h, X) style (exogenous/statforecast)
             if "h" in params and "X" in params:
-                # Both h and X supported (rare, e.g. some exogenous models)
                 h = len(model_input)
                 X = model_input.drop(columns=["ds", "unique_id", "y"], errors="ignore") if not model_input.empty else None
                 return model.predict(h=h, X=X)
+            # (pred_df) style (your SARIMA)
+            elif "pred_df" in params:
+                return model.predict(pred_df=model_input)
+            # (h) style (statforecast)
             elif "h" in params:
-                # Only h supported (StatsForecast style)
                 h = len(model_input)
                 return model.predict(h=h)
+            # (X) style (scikit-learn)
+            elif "X" in params:
+                return model.predict(X=model_input)
+            # fallback: try single arg
             else:
-                # scikit-learn style
                 return model.predict(model_input)
         elif hasattr(model, "forecast"):
             return model.forecast(model_input)
         else:
-            raise RuntimeError("Model does not support predict/forecast")
-        
+            raise RuntimeError("Model does not support predict/forecast")   
+            
 def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", target_col="value"):
     if not os.path.exists(master_data_path):
         # Defensive: create dummy data if source is missing
@@ -134,11 +140,9 @@ def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metric
         json.dump(all_metrics, f, indent=4)
     print(f"[INFO] Model metrics saved to: {file_path}")
 
-def save_pipeline_timing(run_id, timing_info, file_path="artifacts/pipeline_timings.json"):
+def save_pipeline_timing(timing_info, file_path="artifacts/pipeline_timings.json"):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     entry = {
-        "datetime": datetime.now().isoformat(),
-        "run_id": run_id,
         **timing_info
     }
     all_timings = []
@@ -158,6 +162,7 @@ def save_pipeline_timing(run_id, timing_info, file_path="artifacts/pipeline_timi
 
 def retrain_model(models_uri, train_data_path, target_column='value', experiment_name='RetrainExperiment'):
     print(f"🚀 Starting retrain with model: {models_uri} and data: {train_data_path}")
+    mlflow.set_tracking_uri("http://localhost:5001")
 
     if models_uri is None:
         print("⚙️ No existing model URI provided. Running full MLOps pipeline...")
@@ -241,7 +246,11 @@ def run_mlops_pipeline(
     forecast_horizon=24,
     season_list=[6, 12, 24]
 ):
+    start = datetime.now()
+    
     print("Memulai MLOps Pipeline (otomatis model discovery)...")
+    mlflow.set_tracking_uri("http://localhost:5001")
+
     with mlflow.start_run(run_name="Full_MLOps_Pipeline_Run") as pipeline_run:
         mlflow.log_param("pipeline_start_time", datetime.now().isoformat())
         mlflow.log_param("forecast_horizon", forecast_horizon)
@@ -352,49 +361,42 @@ def run_mlops_pipeline(
         mlflow.log_param("pipeline_end_time", datetime.now().isoformat())
         print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
         
+        end = datetime.now()
+        duration_minutes = int((end - start).total_seconds() // 60)
+        
         # Save pipeline timing info
         timing_info = {
-            "best_model_name": overall_best["name"],
-            "best_mae": overall_best["mae"],
-            "pipeline_start_time": pipeline_run.data.params.get("pipeline_start_time"),
-            "pipeline_end_time": datetime.now().isoformat(),
-            "experiment_id": pipeline_run.info.experiment_id,
-            "mlflow_run_id": pipeline_run.info.run_id,
+            "run_date": start.isoformat(),
+            "duration_minutes": duration_minutes,
         }
-        save_pipeline_timing(run_id=pipeline_run.info.run_id, timing_info=timing_info)
+        save_pipeline_timing(timing_info=timing_info)
 
+# def start_mlflow_server(
+#     port=5001,
+#     sqlite_db_path="./mlruns/mlflow.db",
+#     artifact_root="./mlruns"
+# ):
+#     backend_uri = f"sqlite:///{os.path.abspath(sqlite_db_path)}"
 
-def start_mlflow_server(
-    port=5000,
-    postgres_user="mlflow_user",
-    postgres_password="mlflow_pass",
-    postgres_host="localhost",
-    postgres_port=5432,
-    postgres_db="mlflow_db",
-    artifact_root="./mlruns"
-):
-    backend_uri = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}:{postgres_port}/{postgres_db}"
+#     cmd = [
+#         "mlflow", "server",
+#         "--host", "0.0.0.0",
+#         "--port", str(port),
+#         "--backend-store-uri", backend_uri,
+#         "--default-artifact-root", artifact_root,
+#     ]
 
-    cmd = [
-        "mlflow", "server",
-        "--host", "0.0.0.0",
-        "--port", str(port),
-        "--backend-store-uri", backend_uri,
-        "--default-artifact-root", artifact_root,
-    ]
-
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
-    print(f"MLflow server started at http://0.0.0.0:{port} with PID {proc.pid}")
-    print(f"Backend URI: {backend_uri}")
-    return proc
+#     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
+#     print(f"MLflow server started at http://0.0.0.0:{port} with PID {proc.pid}")
+#     print(f"Backend URI: {backend_uri}")
+#     return proc
 
 if __name__ == "__main__":
     args = parse_args()
-    proc = start_mlflow_server()
-    mlflow.set_tracking_uri("http://localhost:5001")
+    # proc = start_mlflow_server(port=5001)
 
     # Ensure all required directories exist
-    for d in ['data', 'data/forecasts', 'artifacts/metrics', 'artifacts/models', 'artifacts', 'processed_data']:
+    for d in ['data', 'data/forecasts', 'artifacts/metrics', 'artifacts/models', 'artifacts', 'processed_data', 'mlruns']:
         os.makedirs(d, exist_ok=True)
 
     master_data_path = 'processed_data/merged_data.csv'
