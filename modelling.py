@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import json
 import os
+import subprocess
+import signal
 import mlflow
 import joblib
 import tempfile
@@ -286,8 +288,24 @@ def run_mlops_pipeline(
         mlflow.log_param("pipeline_end_time", datetime.now().isoformat())
         print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
 
+def start_mlflow_server(port=8110, backend_uri="sqlite:///mlruns.db", artifact_root="./mlruns"):
+    cmd = [
+        "mlflow", "server",
+        "--host", "0.0.0.0",
+        "--port", str(port),
+        "--backend-store-uri", backend_uri,
+        "--default-artifact-root", artifact_root,
+    ]
+    
+    # Start server as a subprocess
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
+    
+    print(f"MLflow server started at http://0.0.0.0:{port} with PID {proc.pid}")
+    return proc
+
 if __name__ == "__main__":
     args = parse_args()
+    proc = start_mlflow_server()
     mlflow.set_tracking_uri("http://localhost:5000")
 
     os.makedirs('data', exist_ok=True)
