@@ -28,7 +28,7 @@ class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
         else:
             raise RuntimeError("Model does not support predict/forecast")
 
-def load_and_preprocess_data(master_data_path="data/master_electricity_prices.csv", target_col="value"):
+def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", target_col="value"):
     df = pd.read_csv(master_data_path)
     df["ds"] = pd.to_datetime(df["timestamp"])
     df = df.rename(columns={target_col: 'y'})
@@ -82,7 +82,7 @@ def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metric
     print(f"Metrik model disimpan ke: {file_path}")
 
 def run_mlops_pipeline(
-    master_data_path="data/master_electricity_prices.csv",
+    master_data_path="processed_data/merged_data.csv",
     forecast_horizon=24,
     season_list=[6, 12, 24]
 ):
@@ -215,7 +215,7 @@ if __name__ == "__main__":
     os.makedirs('artifacts/metrics', exist_ok=True)
     os.makedirs('artifacts/models', exist_ok=True)
     os.makedirs('artifacts', exist_ok=True)
-    master_data_path = 'data/master_electricity_prices.csv'
+    master_data_path = 'processed_data/merged_data.csv'
     if not os.path.exists(master_data_path):
         print("Membuat data dummy master_electricity_prices.csv untuk pengujian lokal...")
         pd.DataFrame({

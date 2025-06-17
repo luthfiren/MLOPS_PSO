@@ -17,5 +17,43 @@
             ]
         },
         "training_date": "2025-06-17T18:50:20.877307"
+    },
+    {
+        "model_name": "SarimaModel",
+        "MAE": 23.381170562430757,
+        "forecast_horizon": 24,
+        "best_params": {
+            "order": [
+                2,
+                1,
+                1
+            ],
+            "seasonal_order": [
+                1,
+                0,
+                1,
+                24
+            ]
+        },
+        "training_date": "2025-06-17T19:54:13.015558"
+    },
+    {
+        "model_name": "SarimaModel",
+        "MAE": 0.9542872511047243,
+        "forecast_horizon": 24,
+        "best_params": {
+            "order": [
+                1,
+                0,
+                1
+            ],
+            "seasonal_order": [
+                1,
+                0,
+                1,
+                24
+            ]
+        },
+        "training_date": "2025-06-17T20:10:59.023210"
     }
 ]

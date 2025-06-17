@@ -7,6 +7,7 @@ import numpy as np
 import json
 import math
 import time
+import mlflow
 import multiprocessing
 from logging.handlers import RotatingFileHandler
 from sklearn.metrics import mean_absolute_error
@@ -189,17 +190,22 @@ class ThetaModel(BaseForecastModel):
         best_model_obj = None
         for params in param_grid:
             try:
-                candidate_model = ThetaModel(
-                    season_length=params["season_length"],
-                    freq=self.freq,
-                    forecast_horizon=params["forecast_horizon"]
-                )
-                score = candidate_model.train_with_fold(folds, optimization=True)
-                self.logger.info(f"Theta Params: {params} | MAE: {score:.4f}")
-                if score < best_score:
-                    best_score = score
-                    best_params_found = params
-                    best_model_obj = candidate_model
+                with mlflow.start_run(nested=True, run_name=f"Theta_Season_{params['season_length']}"):
+                    candidate_model = ThetaModel(
+                        season_length=params["season_length"],
+                        freq=self.freq,
+                        forecast_horizon=params["forecast_horizon"]
+                    )
+                    score = candidate_model.train_with_fold(folds, optimization=True)
+                    mlflow.log_param("model", "ThetaModel")
+                    mlflow.log_param("season_length", params["season_length"])
+                    mlflow.log_param("forecast_horizon", self.forecast_horizon)
+                    mlflow.log_metric("validation_mae", score)
+                    self.logger.info(f"Theta Params: {params} | MAE: {score:.4f}")
+                    if score < best_score:
+                        best_score = score
+                        best_params_found = params
+                        best_model_obj = candidate_model
             except Exception as e:
                 self.logger.warning(f"Skipping params {params} due to error: {e}")
                 continue
@@ -211,7 +217,6 @@ class ThetaModel(BaseForecastModel):
                 score=best_score
             )
             self.logger.info(f"New champion saved: {best_params_found} | Score: {best_score}")
-            # Penting: return 4 value agar kompatibel pipeline otomatis
             return best_score, best_params_found, best_model_obj, "theta_run"
         else:
             self.logger.warning("No improved model found. Retraining current model as fallback.")
