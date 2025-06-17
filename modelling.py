@@ -14,7 +14,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run or retrain MLOps pipeline.")
     parser.add_argument("--mode", choices=["run", "retrain"], default="run", help="Pipeline mode: run or retrain")
     parser.add_argument("--model-uri", type=str, default="models:/ElectricityPriceForecaster/Production")
-    parser.add_argument("--train-data", type=str, default="data/master_electricity_prices.csv")
+    parser.add_argument("--train-data", type=str, default="processed_data/merged_data.csv")
     return parser.parse_args()
 
 # --- Dynamic Model Discovery ---
