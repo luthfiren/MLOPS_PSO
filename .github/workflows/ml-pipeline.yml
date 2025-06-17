@@ -200,7 +200,9 @@ jobs:
           # pip install jupyter mlflow
 
       - name: Running preprocessing
-        run: python MLOPS_PSO/replacement_of_preprocessingipynb.py
+        run: |
+          source venv/bin/activate
+          python replacement_of_preprocessingipynb.py
       
       - name: Start MLflow server
         run: |
