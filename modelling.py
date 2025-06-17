@@ -23,6 +23,7 @@ from model import discover_model_classes
 # ------- Tambahan untuk pyfunc wrapper -------
 import mlflow.pyfunc
 
+
 class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
     def load_context(self, context):
         import joblib
