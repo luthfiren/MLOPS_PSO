@@ -37,9 +37,9 @@ jobs:
            python-version: '3.11'
            
       - name: Install dependencies
-        run: |
-          pip install -r requirement.txt
-          pip install jupyter mlflow
+        run: if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
+          # pip install -r requirement.txt
+          # pip install jupyter mlflow
 
       - name: Run Conditional ML Pipeline
         run: |
