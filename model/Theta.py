@@ -177,6 +177,15 @@ class ThetaModel(BaseForecastModel):
         season_list = season_list or [3, 4, 6, 12, 24]
         if not isinstance(season_list, list) or not all(isinstance(x, int) for x in season_list):
             raise ValueError("season_list must be a list of integers")
+        
+        df = df.copy()
+        df["ds"] = pd.to_datetime(df["ds"]).dt.tz_localize(None)
+        df["ds"] = df["ds"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        df["y"] = pd.to_numeric(df["y"], errors='coerce')
+        if "unique_id" not in df.columns:
+            df["unique_id"] = "series_1"
+        df["unique_id"] = df["unique_id"].astype(str)
+        
         param_grid = ParameterGrid({
             "season_length": season_list,
             "forecast_horizon": [self.forecast_horizon]
