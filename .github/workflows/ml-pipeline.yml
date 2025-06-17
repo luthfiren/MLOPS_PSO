@@ -5,7 +5,11 @@ on:
   push:
     branches: [ webadded ] 
 env:
-  AZURE_WEBAPP_NAME: electricity-market-forecasting
+  AZURE_WEBAPP_NAME: your-azure-webapp-name # Ganti dengan nama Azure Web App Anda
+  AZURE_WEBAPP_RESOURCE_GROUP: MLOPS # Ganti dengan nama Resource Group Anda
+  AZURE_CONTAINER_REGISTRY: mlopspso.azurecr.io # Ganti dengan nama ACR Anda (misalnya, myacr.azurecr.io)
+  DOCKER_IMAGE_NAME: razialvaro/mlops-pso-alkaganteng # Nama Docker image Anda (misalnya, my-node-app)
+  DOCKER_IMAGE_TAG: ${{ github.sha }} # Menggunakan SHA commit sebagai tag image
 
 jobs:
   ml-lifecycle:
@@ -42,30 +46,59 @@ jobs:
           # python -c "from modelling import train_sarima_model; train_sarima_model()"
           # Or if it has a main function:
           # python -c "from modelling import main; main()"
-          
-      - name: Prepare Deployment Package
+    
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }} # Menggunakan Service Principal untuk login ke Azure
+  
+      - name: Docker Login to ACR
+        run: az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY }}
+        # Perintah ini akan menggunakan kredensial Azure dari langkah 'Azure Login'
+        # untuk login ke ACR.
+  
+      - name: Build Docker Image
         run: |
-          # Buat direktori 'publish' jika belum ada untuk mengumpulkan semua file yang diperlukan
-          mkdir -p ./publish/data/forecasts/
-          mkdir -p ./publish/artifacts/metrics/
-          mkdir -p ./publish/artifacts/models/ # Untuk model yang sudah dilatih
-          mkdir -p ./publish/templates/ # Untuk template HTML (misal: untuk Flask/Django)
-          mkdir -p ./publish/static/ # Untuk file statis (CSS, JS, gambar)
+          docker build -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} .
+          # '.' di akhir berarti Dockerfile ada di root konteks build (root repo)
+          # '-t' untuk tag image
+  
+      # - name: Scan Docker Image (Opsional)
+      #   uses: aquasecurity/trivy-action@master
+      #   with:
+      #     image-ref: '${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}'
+      #     format: 'table'
+      #     exit-code: '1' # Gagal jika ada kerentanan (sesuaikan)
+      #     severity: 'CRITICAL,HIGH' # Hanya laporkan kerentanan Critical dan High
+  
+      - name: Push Docker Image to ACR
+        run: docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
+        # Mendorong image yang sudah di-tag ke ACR
 
-          # Salin semua file aplikasi dan model yang diperlukan ke direktori 'publish'
-          # Sesuaikan daftar file/folder ini dengan struktur proyek Python Anda
-          cp app.py ./publish/
-          cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
-          cp -r templates/ ./publish/
-          cp -r static/ ./publish/
-          # Salin model yang sudah dilatih (asumsi 'trained_model.pkl' dibuat oleh 'modelling.py')
-          cp -r model/ ./publish/
+          
+      # - name: Prepare Deployment Package
+      #   run: |
+      #     # Buat direktori 'publish' jika belum ada untuk mengumpulkan semua file yang diperlukan
+      #     mkdir -p ./publish/data/forecasts/
+      #     mkdir -p ./publish/artifacts/metrics/
+      #     mkdir -p ./publish/artifacts/models/ # Untuk model yang sudah dilatih
+      #     mkdir -p ./publish/templates/ # Untuk template HTML (misal: untuk Flask/Django)
+      #     mkdir -p ./publish/static/ # Untuk file statis (CSS, JS, gambar)
 
-          # Kompres seluruh isi direktori 'publish' menjadi satu file .zip
-          # Masuk ke direktori 'publish' terlebih dahulu agar isi zip berada langsung di root-nya.
-          cd publish
-          zip -r ../release.zip .
-          cd .. # Kembali ke direktori root repository
+      #     # Salin semua file aplikasi dan model yang diperlukan ke direktori 'publish'
+      #     # Sesuaikan daftar file/folder ini dengan struktur proyek Python Anda
+      #     cp app.py ./publish/
+      #     cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
+      #     cp -r templates/ ./publish/
+      #     cp -r static/ ./publish/
+      #     # Salin model yang sudah dilatih (asumsi 'trained_model.pkl' dibuat oleh 'modelling.py')
+      #     cp -r model/ ./publish/
+
+      #     # Kompres seluruh isi direktori 'publish' menjadi satu file .zip
+      #     # Masuk ke direktori 'publish' terlebih dahulu agar isi zip berada langsung di root-nya.
+      #     cd publish
+      #     zip -r ../release.zip .
+      #     cd .. # Kembali ke direktori root repository
 
       - name: Upload Application Artifact
         uses: actions/upload-artifact@v4
