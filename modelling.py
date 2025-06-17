@@ -13,7 +13,7 @@ from datetime import datetime
 def parse_args():
     parser = argparse.ArgumentParser(description="Run or retrain MLOps pipeline.")
     parser.add_argument("--mode", choices=["run", "retrain"], default="run", help="Pipeline mode: run or retrain")
-    parser.add_argument("--model-uri", type=str, default="models:/ElectricityForecaster/Production")
+    parser.add_argument("--model-uri", type=str, default="models:/ElectricityForecaster/latest", help="MLflow Model URI (default: latest)")
     parser.add_argument("--train-data", type=str, default="processed_data/merged_data.csv")
     return parser.parse_args()
 
@@ -30,30 +30,22 @@ class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
     def predict(self, context, model_input):
         import inspect
         model = self.load_context(context)
-        # Defensive: If model_input is not a DataFrame, try to convert
         if not isinstance(model_input, pd.DataFrame):
             model_input = pd.DataFrame(model_input)
-
-        # Use inspect to check which args are accepted
         if hasattr(model, "predict"):
             sig = inspect.signature(model.predict)
             params = sig.parameters
-            # (h, X) style (exogenous/statforecast)
             if "h" in params and "X" in params:
                 h = len(model_input)
                 X = model_input.drop(columns=["ds", "unique_id", "y"], errors="ignore") if not model_input.empty else None
                 return model.predict(h=h, X=X)
-            # (pred_df) style (your SARIMA)
             elif "pred_df" in params:
                 return model.predict(pred_df=model_input)
-            # (h) style (statforecast)
             elif "h" in params:
                 h = len(model_input)
                 return model.predict(h=h)
-            # (X) style (scikit-learn)
             elif "X" in params:
                 return model.predict(X=model_input)
-            # fallback: try single arg
             else:
                 return model.predict(model_input)
         elif hasattr(model, "forecast"):
@@ -63,7 +55,6 @@ class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
             
 def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", target_col="value"):
     if not os.path.exists(master_data_path):
-        # Defensive: create dummy data if source is missing
         print(f"Warning: '{master_data_path}' not found. Creating dummy data.")
         os.makedirs(os.path.dirname(master_data_path), exist_ok=True)
         pd.DataFrame({
@@ -75,11 +66,10 @@ def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", 
     df["ds"] = pd.to_datetime(df["timestamp"])
     df = df.rename(columns={target_col: 'y'})
     if 'unique_id' not in df.columns:
-         df['unique_id'] = 'series_1'
+        df['unique_id'] = 'series_1'
     df["y"] = pd.to_numeric(df["y"], errors='coerce')
     df["unique_id"] = df["unique_id"].astype(str)
     df = df.sort_values(by='ds').reset_index(drop=True)
-    total_len = len(df)
     forecast_horizon = 24
     val_len = forecast_horizon * 2
     test_df_for_prediction = df.iloc[-forecast_horizon:]
@@ -89,41 +79,32 @@ def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", 
     return train_df_for_training, val_df_for_evaluation, test_df_for_prediction, full_training_df, df
 
 def save_forecast_to_csv(forecast_df: pd.DataFrame, master_actuals_df: pd.DataFrame, file_path="data/forecasts/latest_forecast.csv"):
-    import os
-    import pandas as pd
-
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
     if forecast_df.empty:
         raise ValueError("Forecast dataframe is empty after prediction.")
-    # Fix for statsforecast: rename 'Theta' to 'yhat' if necessary
+    # Support statsforecast: rename 'Theta' to 'yhat' if necessary
     if 'yhat' not in forecast_df.columns and 'Theta' in forecast_df.columns:
         forecast_df = forecast_df.rename(columns={'Theta': 'yhat'})
-
     forecast_df_renamed = forecast_df.rename(columns={'yhat': 'predicted_price', 'ds': 'tanggal_jam'})
     master_actuals_df_renamed = master_actuals_df.rename(columns={'y': 'actual_price', 'ds': 'tanggal_jam'})
-
     forecast_df_renamed['tanggal_jam'] = pd.to_datetime(forecast_df_renamed['tanggal_jam']).dt.tz_localize(None)
     master_actuals_df_renamed['tanggal_jam'] = pd.to_datetime(master_actuals_df_renamed['tanggal_jam']).dt.tz_localize(None)
-
     merged_df = pd.merge(
         forecast_df_renamed,
         master_actuals_df_renamed[['tanggal_jam', 'actual_price']],
         on='tanggal_jam',
         how='left'
     )
-    # Defensive: check for required columns before selecting
     for col in ['tanggal_jam', 'predicted_price', 'actual_price']:
         if col not in merged_df.columns:
             raise KeyError(f"Column '{col}' not in merged_df.columns: {merged_df.columns}")
-
     final_output_df = merged_df[['tanggal_jam', 'predicted_price', 'actual_price']]
     final_output_df.to_csv(file_path, index=False)
     print(f"Hasil prediksi (termasuk aktual yang up-to-date) disimpan ke: {file_path}")
-    
+
 def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metrics.json"):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    metrics_dict = metrics_dict.copy()  # Avoid modifying original dict
+    metrics_dict = metrics_dict.copy()
     metrics_dict['training_date'] = datetime.now().isoformat()
     all_metrics = []
     if os.path.exists(file_path):
@@ -142,9 +123,7 @@ def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metric
 
 def save_pipeline_timing(timing_info, file_path="artifacts/pipeline_timings.json"):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    entry = {
-        **timing_info
-    }
+    entry = {**timing_info}
     all_timings = []
     if os.path.exists(file_path):
         try:
@@ -166,29 +145,20 @@ def run_mlops_pipeline(
     season_list=[6, 12, 24]
 ):
     start = datetime.now()
-    
     print("Memulai MLOps Pipeline (otomatis model discovery)...")
     mlflow.set_tracking_uri("http://localhost:5001")
 
     with mlflow.start_run(run_name="Full_MLOps_Pipeline_Run") as pipeline_run:
         mlflow.log_param("pipeline_start_time", datetime.now().isoformat())
         mlflow.log_param("forecast_horizon", forecast_horizon)
-
-        # 1. Load dan Preprocess Data
-        print("Memuat dan memproses data...")
         train_df, val_df, test_df_for_prediction, full_training_df, master_df_full = \
             load_and_preprocess_data(master_data_path)
-
         mlflow.log_param("master_data_rows", len(master_df_full))
         mlflow.log_param("train_data_rows", len(train_df))
         mlflow.log_param("val_data_rows", len(val_df))
         mlflow.log_param("test_data_for_prediction_rows", len(test_df_for_prediction))
-
-        # 2. Dynamic Model Discovery & Optimasi
-        print("Mencari dan mengoptimasi seluruh model di folder /model...")
         all_model_classes = discover_model_classes()
         print(f"Model ditemukan: {list(all_model_classes.keys())}")
-
         best_models_info = []
         for model_name, ModelCls in all_model_classes.items():
             print(f"\nOptimasi: {model_name}")
@@ -258,13 +228,15 @@ def run_mlops_pipeline(
             future_input_df['unique_id'] = full_training_df['unique_id'].iloc[0]
         future_input_df['y'] = np.nan
 
+        # ================================
+        # ALWAYS LOAD LATEST MODEL (not Production)
+        # ================================
         try:
-            loaded_forecaster = mlflow.pyfunc.load_model(model_uri="models:/ElectricityForecaster/Production")
-            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Production Stage).")
-        except Exception as e:
-            print(f"Gagal memuat model Production: {e}. Mencoba memuat versi terbaru yang terdaftar.")
             loaded_forecaster = mlflow.pyfunc.load_model(model_uri="models:/ElectricityForecaster/latest")
-            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Versi Terbaru).")
+            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (latest version).")
+        except Exception as e:
+            print(f"Error loading model from registry: {e}")
+            raise e
 
         forecast_result_df = loaded_forecaster.predict(future_input_df)
         save_forecast_to_csv(forecast_result_df, master_df_full, "data/forecasts/latest_forecast.csv")
@@ -283,49 +255,23 @@ def run_mlops_pipeline(
         end = datetime.now()
         duration_minutes = int((end - start).total_seconds() // 60)
         
-        # Save pipeline timing info
         timing_info = {
             "run_date": start.isoformat(),
             "duration_minutes": duration_minutes,
         }
         save_pipeline_timing(timing_info=timing_info)
 
-# def start_mlflow_server(
-#     port=5001,
-#     sqlite_db_path="./mlruns/mlflow.db",
-#     artifact_root="./mlruns"
-# ):
-#     backend_uri = f"sqlite:///{os.path.abspath(sqlite_db_path)}"
-
-#     cmd = [
-#         "mlflow", "server",
-#         "--host", "0.0.0.0",
-#         "--port", str(port),
-#         "--backend-store-uri", backend_uri,
-#         "--default-artifact-root", artifact_root,
-#     ]
-
-#     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
-#     print(f"MLflow server started at http://0.0.0.0:{port} with PID {proc.pid}")
-#     print(f"Backend URI: {backend_uri}")
-#     return proc
-
 def retrain_model(models_uri, train_data_path, target_column='value', experiment_name='RetrainExperiment'):
     print(f"🚀 Starting retrain with model: {models_uri} and data: {train_data_path}")
     mlflow.set_tracking_uri("http://localhost:5001")
-
     if models_uri is None:
         print("⚙️ No existing model URI provided. Running full MLOps pipeline...")
         run_mlops_pipeline()
         return
-
     loaded_model = mlflow.pyfunc.load_model(model_uri=models_uri)
     model = loaded_model._model_impl.load_context(loaded_model._model_impl._context)
-
     train_df, val_df, test_df, _, full_df = load_and_preprocess_data(master_data_path=train_data_path, target_col=target_column)
-
     is_statsforecast = hasattr(model, "fit") and hasattr(model, "predict") and hasattr(model, "models")
-
     if is_statsforecast:
         model.fit(train_df[["unique_id", "ds", "y"]])
         forecast_val = model.predict(h=len(val_df)).rename(columns={'Theta': 'yhat'})
@@ -346,9 +292,7 @@ def retrain_model(models_uri, train_data_path, target_column='value', experiment
         y_val_actual = val_df['y']
         y_val_pred = model.predict(X_val)
         mae_val = np.mean(np.abs(y_val_actual - y_val_pred))
-
     print(f"📊 MAE on validation set: {mae_val:.4f}")
-
     metrics_file = 'artifacts/metrics/model_metrics.json'
     best_prev_mae = None
     if os.path.exists(metrics_file):
@@ -358,7 +302,6 @@ def retrain_model(models_uri, train_data_path, target_column='value', experiment
                 metrics_data_sorted = sorted(metrics_data, key=lambda x: x['MAE'])
                 best_prev_mae = metrics_data_sorted[0]['MAE']
                 print(f"📁 Best previous MAE: {best_prev_mae:.4f}")
-
     if best_prev_mae is None or mae_val < best_prev_mae:
         print("✅ New retrained model is better. Running full MLOps pipeline to promote...")
         run_mlops_pipeline()
@@ -371,36 +314,27 @@ def retrain_model(models_uri, train_data_path, target_column='value', experiment
             forecast_result_df = model.predict(test_df.drop(columns=['ds', 'unique_id', 'y']))
             forecast_df = pd.DataFrame({'ds': test_df['ds'], 'yhat': forecast_result_df})
         save_forecast_to_csv(forecast_df, full_df, "data/forecasts/latest_forecast.csv")
-
     mlflow.set_experiment(experiment_name)
     with mlflow.start_run(run_name=f"LatestRetrain-{datetime.now().isoformat()}") as run:
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = f"{tmpdir}/model.pkl"
             joblib.dump(model, model_path)
-
             mlflow.pyfunc.log_model(
                 artifact_path="model",
                 python_model=JoblibModelWrapper(),
                 artifacts={"model_path": model_path},
             )
-
             mlflow.log_metric("MAE", mae_val)
             mlflow.set_tag("model_name", "RetrainedModel")
             mlflow.set_tag("retrain_date", datetime.now().isoformat())
             mlflow.set_tag("promotion_decision", "promoted" if best_prev_mae is None or mae_val < best_prev_mae else "rejected")
-
     print("📁 Latest retrained model and metrics logged to MLflow for audit.")
 
 if __name__ == "__main__":
     args = parse_args()
-    # proc = start_mlflow_server(port=5001)
-
-    # Ensure all required directories exist
     for d in ['data', 'data/forecasts', 'artifacts/metrics', 'artifacts/models', 'artifacts', 'processed_data', 'mlruns']:
         os.makedirs(d, exist_ok=True)
-
     master_data_path = 'processed_data/merged_data.csv'
-
     if not os.path.exists(master_data_path):
         print("Creating dummy master_electricity_prices.csv...")
         pd.DataFrame({
@@ -408,8 +342,7 @@ if __name__ == "__main__":
             'value': np.random.rand(200) * 100,
             'unique_id': 'series_1'
         }).to_csv(master_data_path, index=False)
-
     if args.mode != "retrain":
         run_mlops_pipeline(master_data_path=args.train_data, forecast_horizon=24)
     else:
-        retrain_model(model_uri=args.model_uri, train_data_path=args.train_data)
+        retrain_model(models_uri=args.model_uri, train_data_path=args.train_data)
