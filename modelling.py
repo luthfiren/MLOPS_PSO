@@ -117,21 +117,44 @@ def save_forecast_to_csv(forecast_df: pd.DataFrame, master_actuals_df: pd.DataFr
     
 def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metrics.json"):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    metrics_dict = metrics_dict.copy()  # Avoid modifying original dict
     metrics_dict['training_date'] = datetime.now().isoformat()
     all_metrics = []
     if os.path.exists(file_path):
         try:
             with open(file_path, 'r') as f:
                 all_metrics = json.load(f)
-            if not isinstance(all_metrics, list):
-                all_metrics = [all_metrics]
-        except json.JSONDecodeError:
-            print(f"Warning: Existing {file_path} is corrupted. Starting new metrics list.")
+                if not isinstance(all_metrics, list):
+                    all_metrics = [all_metrics]
+        except (json.JSONDecodeError, IOError):
+            print(f"[WARNING] Existing file {file_path} is invalid. Starting new metrics list.")
             all_metrics = []
     all_metrics.append(metrics_dict)
     with open(file_path, 'w') as f:
         json.dump(all_metrics, f, indent=4)
-    print(f"Metrik model disimpan ke: {file_path}")
+    print(f"[INFO] Model metrics saved to: {file_path}")
+
+def save_pipeline_timing(run_id, timing_info, file_path="artifacts/pipeline_timings.json"):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    entry = {
+        "datetime": datetime.now().isoformat(),
+        "run_id": run_id,
+        **timing_info
+    }
+    all_timings = []
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r") as f:
+                all_timings = json.load(f)
+            if not isinstance(all_timings, list):
+                all_timings = [all_timings]
+        except json.JSONDecodeError:
+            print(f"Warning: Existing {file_path} is corrupted. Starting new timing list.")
+            all_timings = []
+    all_timings.append(entry)
+    with open(file_path, "w") as f:
+        json.dump(all_timings, f, indent=4)
+    print(f"Pipeline timing saved to: {file_path}")
 
 def retrain_model(models_uri, train_data_path, target_column='value', experiment_name='RetrainExperiment'):
     print(f"🚀 Starting retrain with model: {models_uri} and data: {train_data_path}")
@@ -328,6 +351,18 @@ def run_mlops_pipeline(
 
         mlflow.log_param("pipeline_end_time", datetime.now().isoformat())
         print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
+        
+        # Save pipeline timing info
+        timing_info = {
+            "best_model_name": overall_best["name"],
+            "best_mae": overall_best["mae"],
+            "pipeline_start_time": pipeline_run.data.params.get("pipeline_start_time"),
+            "pipeline_end_time": datetime.now().isoformat(),
+            "experiment_id": pipeline_run.info.experiment_id,
+            "mlflow_run_id": pipeline_run.info.run_id,
+        }
+        save_pipeline_timing(run_id=pipeline_run.info.run_id, timing_info=timing_info)
+
 
 def start_mlflow_server(
     port=5000,
