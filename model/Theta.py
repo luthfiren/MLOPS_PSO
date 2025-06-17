@@ -67,7 +67,6 @@ class ThetaModel(BaseForecastModel):
         for i, (train_df, test_df) in enumerate(folds):
             train_df = train_df.copy()
             test_df = test_df.copy()
-            # --- FIX: Ensure types are correct before fitting ---
             train_df["ds"] = pd.to_datetime(train_df["ds"])
             test_df["ds"] = pd.to_datetime(test_df["ds"])
             train_df["y"] = pd.to_numeric(train_df["y"], errors='coerce')
@@ -78,7 +77,9 @@ class ThetaModel(BaseForecastModel):
                 test_df["unique_id"] = "series_1"
             train_df["unique_id"] = train_df["unique_id"].astype(str)
             test_df["unique_id"] = test_df["unique_id"].astype(str)
-            # -----------------------------------------------------
+            # Hanya kolom yang diperlukan!
+            train_df = train_df[["unique_id", "ds", "y"]]
+            test_df = test_df[["unique_id", "ds", "y"]]
 
             self.model = StatsForecast(
                 models=[Theta(season_length=self.season_length)],
@@ -89,7 +90,6 @@ class ThetaModel(BaseForecastModel):
             forecast = self.model.predict(h=len(test_df)).rename(columns={'Theta': 'yhat'})
             forecast['ds'] = pd.to_datetime(forecast['ds'])
             test_df['ds'] = pd.to_datetime(test_df['ds'])
-            # --- Merge by ds and unique_id (for robustness) ---
             actual = pd.merge(
                 test_df[['ds', 'unique_id', 'y']],
                 forecast[['ds', 'unique_id', 'yhat']],
@@ -112,6 +112,7 @@ class ThetaModel(BaseForecastModel):
             pred_df["unique_id"] = "series_1"
         pred_df["ds"] = pd.to_datetime(pred_df["ds"])
         pred_df["unique_id"] = pred_df["unique_id"].astype(str)
+        pred_df = pred_df[["unique_id", "ds", "y"]] if "y" in pred_df.columns else pred_df[["unique_id", "ds"]]
         if h is None:
             h = len(pred_df)
         forecast = self.model.predict(h=h)
@@ -180,12 +181,13 @@ class ThetaModel(BaseForecastModel):
         
         df = df.copy()
         df["ds"] = pd.to_datetime(df["ds"]).dt.tz_localize(None)
-        df["ds"] = df["ds"].dt.strftime("%Y-%m-%d %H:%M:%S")
         df["y"] = pd.to_numeric(df["y"], errors='coerce')
         if "unique_id" not in df.columns:
             df["unique_id"] = "series_1"
         df["unique_id"] = df["unique_id"].astype(str)
-        
+        # Hanya kolom yang diperlukan!
+        df = df[["unique_id", "ds", "y"]]
+
         param_grid = ParameterGrid({
             "season_length": season_list,
             "forecast_horizon": [self.forecast_horizon]
