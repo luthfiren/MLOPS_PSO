@@ -66,21 +66,43 @@ def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", 
     return train_df_for_training, val_df_for_evaluation, test_df_for_prediction, full_training_df, df
 
 def save_forecast_to_csv(forecast_df: pd.DataFrame, master_actuals_df: pd.DataFrame, file_path="data/forecasts/latest_forecast.csv"):
+    import os
+    import pandas as pd
+
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    # Fix for statsforecast: rename 'Theta' to 'yhat' if necessary
+    if 'yhat' not in forecast_df.columns and 'Theta' in forecast_df.columns:
+        forecast_df = forecast_df.rename(columns={'Theta': 'yhat'})
+    
+    # Rename columns
     forecast_df_renamed = forecast_df.rename(columns={'yhat': 'predicted_price', 'ds': 'tanggal_jam'})
     master_actuals_df_renamed = master_actuals_df.rename(columns={'y': 'actual_price', 'ds': 'tanggal_jam'})
+
     forecast_df_renamed['tanggal_jam'] = pd.to_datetime(forecast_df_renamed['tanggal_jam']).dt.tz_localize(None)
     master_actuals_df_renamed['tanggal_jam'] = pd.to_datetime(master_actuals_df_renamed['tanggal_jam']).dt.tz_localize(None)
+
+    print("DEBUG: forecast_df_renamed columns:", forecast_df_renamed.columns)
+    print("DEBUG: master_actuals_df_renamed columns:", master_actuals_df_renamed.columns)
+
     merged_df = pd.merge(
         forecast_df_renamed,
         master_actuals_df_renamed[['tanggal_jam', 'actual_price']],
         on='tanggal_jam',
         how='left'
     )
+
+    print("DEBUG: merged_df columns:", merged_df.columns)
+
+    # Check columns before selecting
+    for col in ['tanggal_jam', 'predicted_price', 'actual_price']:
+        if col not in merged_df.columns:
+            raise KeyError(f"Column '{col}' not in merged_df.columns: {merged_df.columns}")
+
     final_output_df = merged_df[['tanggal_jam', 'predicted_price', 'actual_price']]
     final_output_df.to_csv(file_path, index=False)
     print(f"Hasil prediksi (termasuk aktual yang up-to-date) disimpan ke: {file_path}")
-
+    
 def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metrics.json"):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     metrics_dict['training_date'] = datetime.now().isoformat()
