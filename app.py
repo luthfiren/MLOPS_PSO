@@ -5,7 +5,11 @@ import os
 import json
 import base64
 from io import BytesIO
-from flask import Flask, render_template
+from flask import Flask, render_template, redirect, url_for
+import importlib
+from datetime import datetime, timezone
+import requests
+import time
 
 # --- IMpor modul-modul dari modelling.py yang relevan jika app.py juga melakukan prediksi real-time ---
 # CATATAN: Untuk dashboard monitoring, app.py biasanya HANYA MEMBACA hasil dari modelling.py.
@@ -171,7 +175,25 @@ def plot_pipeline_timings(timings_file='artifacts/pipeline_timings.json', daily_
     except Exception as e:
         print(f"Terjadi error saat membuat plot waktu pipeline: {e}")
         return None
+    
+def trigger_github_action():
+    GITHUB_TOKEN = "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"  # ⚠️ Store securely (use environment variables in production)
+    REPO = "luthfiren/MLOPS_PSO"
+    WORKFLOW_ID = "ml-pipeline.yml"  # or file name of your workflow in .github/workflows/
+    API_URL = f"https://api.github.com/repos/{REPO}/actions/workflows/{WORKFLOW_ID}/dispatches"
 
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {GITHUB_TOKEN}"
+    }
+
+    data = {
+        "ref": "master"  # or your deployment branch
+    }
+
+    response = requests.post(API_URL, headers=headers, json=data)
+    response.raise_for_status()  # Raises error if failed
+    
 # ====================================================================================================
 # APLIKASI FLASK
 # ====================================================================================================
@@ -202,30 +224,54 @@ def dashboard():
         plot_pipeline_timings=plot_pipeline_timings_img
     )
 
-from flask import request, jsonify
-
 @app.route('/predict', methods=['POST'])
 def predict():
-    """
-    Placeholder API endpoint for triggering predictions.
-    In the future, integrate with real prediction functions.
-    """
     try:
-        # Example: You can parse JSON payload if needed
-        # data = request.get_json()
-        # features = data.get("features")
+        importingDataFingrid = importlib.import_module("importingDataFinGrid")
+        last_ingestion_time = importingDataFingrid.load_last_success_time()
+        now = datetime.now(timezone.utc)
 
-        # Dummy result for now
-        result = {
-            "status": "success",
-            "message": "Prediction triggered successfully.",
-            "prediction": None  # Fill this later with real prediction result
-        }
-        return jsonify(result), 200
+        if last_ingestion_time.date() != now.date():
+            trigger_github_action()
+
+            forecast_path = "data/forecasts/latest_forecast.csv"
+            timeout = 1500
+            polling_interval = 60
+            elapsed = 0
+
+            while elapsed < timeout:
+                if os.path.exists(forecast_path):
+                    file_mod_time = datetime.fromtimestamp(os.path.getmtime(forecast_path), tz=timezone.utc)
+                    if file_mod_time.date() == now.date():
+                        break
+                time.sleep(polling_interval)
+                elapsed += polling_interval
+
+            else:
+                raise TimeoutError("Timeout waiting for new forecast file.")
+
+        return redirect(url_for('dashboard'))
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        # Generate plots same as in dashboard() to maintain consistency
+        forecast_file = 'data/forecasts/latest_forecast.csv'
+        historical_actuals_file = 'data/historical_actuals.csv'
+        metrics_file = 'artifacts/metrics/sarima_metrics.json'
+        timings_file = 'artifacts/pipeline_timings.json'
 
+        plot_forecast_vs_actual_img = plot_forecast_vs_actual(forecast_file, historical_actuals_file)
+        plot_mae_trend_img = plot_mae_trend(metrics_file)
+        plot_pipeline_timings_img = plot_pipeline_timings(timings_file)
+
+        return render_template(
+            'index.html',
+            plot_forecast_vs_actual=plot_forecast_vs_actual_img,
+            plot_mae_trend=plot_mae_trend_img,
+            plot_pipeline_timings=plot_pipeline_timings_img,
+            error=str(e)
+        ), 500
+
+    
 # ====================================================================================================
 # BLOK EKSEKUSI UTAMA (untuk menjalankan aplikasi Flask)
 # ====================================================================================================
