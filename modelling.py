@@ -331,11 +331,11 @@ def run_mlops_pipeline(
         future_input_df['y'] = np.nan
 
         try:
-            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/Production")
+            loaded_forecaster = mlflow.pyfunc.load_model(model_uri="models:/ElectricityForecaster/Production")
             print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Production Stage).")
         except Exception as e:
             print(f"Gagal memuat model Production: {e}. Mencoba memuat versi terbaru yang terdaftar.")
-            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/latest")
+            loaded_forecaster = mlflow.pyfunc.load_model(model_uri="models:/ElectricityForecaster/latest")
             print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Versi Terbaru).")
 
         forecast_result_df = loaded_forecaster.predict(future_input_df)
