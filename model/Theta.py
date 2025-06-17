@@ -15,7 +15,7 @@ from statsforecast.models import Theta
 from statsforecast import StatsForecast
 
 class ThetaModel(BaseForecastModel):
-    def __init__(self, season_length=12, freq='h', forecast_horizon=24):
+    def __init__(self, season_length=12, freq='h', forecast_horizon=24, season_list=None, **kwargs):
         supported_freq = ['h', 'd', 'w', 'm']
         if freq not in supported_freq:
             raise ValueError(f"Unsupported frequency '{freq}'. Supported: {supported_freq}")
@@ -23,6 +23,7 @@ class ThetaModel(BaseForecastModel):
         self.season_length = season_length
         self.freq = freq
         self.forecast_horizon = forecast_horizon
+        self.season_list = season_list
         self.model_name = 'ThetaModel'
         self.n_jobs = math.ceil(multiprocessing.cpu_count() / 4)
         self.model_dir = Path(__file__).parent
@@ -30,6 +31,7 @@ class ThetaModel(BaseForecastModel):
         self.champion_score_file = self.model_dir / "champion_score.txt"
         self.champion_config_file = self.model_dir / "champion_config.json"
         self.model_file = self.model_dir / f"{self.model_name}_champion.joblib"
+        self.mlflow_artifact_path = "champion_thetamodel"
         self.logger = self._setup_logger()
 
         self.model = StatsForecast(
@@ -62,13 +64,38 @@ class ThetaModel(BaseForecastModel):
         start_time = time.time()
         scores = []
         for i, (train_df, test_df) in enumerate(folds):
+            train_df = train_df.copy()
             test_df = test_df.copy()
+            # --- FIX: Ensure types are correct before fitting ---
+            train_df["ds"] = pd.to_datetime(train_df["ds"])
+            test_df["ds"] = pd.to_datetime(test_df["ds"])
+            train_df["y"] = pd.to_numeric(train_df["y"], errors='coerce')
+            test_df["y"] = pd.to_numeric(test_df["y"], errors='coerce')
+            if "unique_id" not in train_df.columns:
+                train_df["unique_id"] = "series_1"
+            if "unique_id" not in test_df.columns:
+                test_df["unique_id"] = "series_1"
+            train_df["unique_id"] = train_df["unique_id"].astype(str)
+            test_df["unique_id"] = test_df["unique_id"].astype(str)
+            # -----------------------------------------------------
+
+            self.model = StatsForecast(
+                models=[Theta(season_length=self.season_length)],
+                freq=self.freq,
+                n_jobs=self.n_jobs
+            )
             self.model.fit(train_df)
             forecast = self.model.predict(h=len(test_df)).rename(columns={'Theta': 'yhat'})
-            test_df['ds'] = pd.to_datetime(test_df['ds']).dt.tz_localize(None)
-            forecast['ds'] = pd.to_datetime(forecast['ds']).dt.tz_localize(None)
-            actual = test_df[test_df['ds'].isin(forecast['ds'])]
-            score = mean_absolute_error(actual['y'], forecast['yhat'])
+            forecast['ds'] = pd.to_datetime(forecast['ds'])
+            test_df['ds'] = pd.to_datetime(test_df['ds'])
+            # --- Merge by ds and unique_id (for robustness) ---
+            actual = pd.merge(
+                test_df[['ds', 'unique_id', 'y']],
+                forecast[['ds', 'unique_id', 'yhat']],
+                on=['ds', 'unique_id'],
+                how='inner'
+            )
+            score = mean_absolute_error(actual['y'], actual['yhat'])
             scores.append(score)
         avg_score = np.mean(scores)
         elapsed_time = time.time() - start_time
@@ -77,13 +104,17 @@ class ThetaModel(BaseForecastModel):
         return avg_score
 
     def predict(self, pred_df: pd.DataFrame, h=None):
+        pred_df = pred_df.copy()
         if "ds" not in pred_df.columns:
             raise ValueError("Input dataframe must contain a 'ds' column.")
+        if "unique_id" not in pred_df.columns:
+            pred_df["unique_id"] = "series_1"
+        pred_df["ds"] = pd.to_datetime(pred_df["ds"])
+        pred_df["unique_id"] = pred_df["unique_id"].astype(str)
         if h is None:
             h = len(pred_df)
-        pred_df['ds'] = pd.to_datetime(pred_df['ds']).dt.tz_localize(None)
         forecast = self.model.predict(h=h)
-        forecast["ds"] = pd.to_datetime(forecast["ds"]).dt.tz_localize(None)
+        forecast["ds"] = pd.to_datetime(forecast["ds"])
         if 'unique_id' not in forecast.columns and 'unique_id' in pred_df.columns:
             forecast['unique_id'] = pred_df['unique_id'].iloc[0]
         if len(forecast) != h:
@@ -93,8 +124,10 @@ class ThetaModel(BaseForecastModel):
     def evaluate(self, actual_df: pd.DataFrame, forecast_df: pd.DataFrame) -> float:
         actual_df = actual_df.copy()
         forecast_df = forecast_df.copy()
-        actual_df.loc[:, "ds"] = pd.to_datetime(actual_df["ds"]).dt.tz_localize(None)
-        forecast_df.loc[:, "ds"] = pd.to_datetime(forecast_df["ds"]).dt.tz_localize(None)
+        actual_df["ds"] = pd.to_datetime(actual_df["ds"])
+        forecast_df["ds"] = pd.to_datetime(forecast_df["ds"])
+        actual_df["unique_id"] = actual_df["unique_id"].astype(str)
+        forecast_df["unique_id"] = forecast_df["unique_id"].astype(str)
         merged = pd.merge(actual_df, forecast_df, on=["unique_id", "ds"], how="inner")
         if merged.empty:
             raise ValueError("No matching timestamps between actual and forecast data during evaluation.")
@@ -133,12 +166,12 @@ class ThetaModel(BaseForecastModel):
 
     def _generate_future_dates(self, last_train_df: pd.DataFrame, h: int) -> pd.DataFrame:
         unique_id = last_train_df["unique_id"].iloc[0] if "unique_id" in last_train_df.columns else "series_1"
-        last_date = pd.to_datetime(last_train_df["ds"].iloc[-1]).dt.tz_localize(None)
+        last_date = pd.to_datetime(last_train_df["ds"].iloc[-1])
         freq = pd.infer_freq(last_train_df["ds"]) or 'H'
         future_dates = pd.date_range(start=last_date + pd.tseries.frequencies.to_offset(freq), periods=h, freq=freq)
         return pd.DataFrame({"unique_id": unique_id, "ds": future_dates, "y": np.nan})
 
-    def optimize(self, df: pd.DataFrame, forecast_horizon=24, season_list=None):
+    def optimize(self, df: pd.DataFrame, forecast_horizon=24, season_list=None, **kwargs):
         self.forecast_horizon = forecast_horizon
         season_list = season_list or [3, 4, 6, 12, 24]
         if not isinstance(season_list, list) or not all(isinstance(x, int) for x in season_list):
@@ -178,7 +211,8 @@ class ThetaModel(BaseForecastModel):
                 score=best_score
             )
             self.logger.info(f"New champion saved: {best_params_found} | Score: {best_score}")
-            return best_score, best_params_found, best_model_obj
+            # Penting: return 4 value agar kompatibel pipeline otomatis
+            return best_score, best_params_found, best_model_obj, "theta_run"
         else:
             self.logger.warning("No improved model found. Retraining current model as fallback.")
             fallback_model = self.__class__(**self.params)
@@ -190,4 +224,4 @@ class ThetaModel(BaseForecastModel):
                 score=fallback_score
             )
             self.logger.info(f"Fallback model retrained and saved with score: {fallback_score}")
-            return fallback_score, self.params, fallback_model
+            return fallback_score, self.params, fallback_model, "theta_fallback"

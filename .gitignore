@@ -3,6 +3,7 @@
 
 # Virtual Environment
 newVenv/
+mlruns/
 
 # cache
 __pycache__

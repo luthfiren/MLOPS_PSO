@@ -18,7 +18,8 @@ class SarimaModel(BaseForecastModel):
         order=(1, 1, 1),
         seasonal_order=(1, 1, 1, 24),
         freq='h',
-        forecast_horizon=24
+        forecast_horizon=24,
+        **kwargs  # untuk kompatibilitas dengan pipeline otomatis
     ):
         supported_freq = ['h', 'd', 'w', 'm']
         if freq not in supported_freq:
@@ -31,15 +32,14 @@ class SarimaModel(BaseForecastModel):
         self.model_name = 'SarimaModel'
         self.n_jobs = 1  # SARIMAX tidak mendukung parallel processing
 
-        # FIX: Setup paths BEFORE logger
         self.model_dir = Path(__file__).parent
         self.log_file = self.model_dir / "training.log"
         self.champion_score_file = self.model_dir / "champion_score.txt"
         self.champion_config_file = self.model_dir / "champion_config.json"
         self.model_file = self.model_dir / f"{self.model_name}_champion.joblib"
+        self.mlflow_artifact_path = "champion_sarimamodel"
 
         self.logger = self._setup_logger()
-
         self.model = None
 
         self.params = {
@@ -73,14 +73,13 @@ class SarimaModel(BaseForecastModel):
             if 'y' not in train_data.columns:
                 raise ValueError("DataFrame harus memiliki kolom 'y'")
 
-            # FIT model and store results in self.model
             model = SARIMAX(
                 train_data['y'],
                 order=self.order,
                 seasonal_order=self.seasonal_order
             )
             results = model.fit(disp=False)
-            self.model = results  # <--- FIX: save the fitted results object
+            self.model = results
 
             forecast = results.get_forecast(steps=len(test_data))
             pred_mean = forecast.predicted_mean
@@ -110,7 +109,7 @@ class SarimaModel(BaseForecastModel):
             pred_data['y'] = np.nan
 
         steps = h if (h is not None) else len(pred_data)
-        forecast = self.model.get_forecast(steps=steps)  # self.model is SARIMAXResults
+        forecast = self.model.get_forecast(steps=steps)
         pred_mean = forecast.predicted_mean
         pred_ci = forecast.conf_int()
 
@@ -162,9 +161,10 @@ class SarimaModel(BaseForecastModel):
 
         return folds
 
-    def optimize(self, df, forecast_horizon=24, order_grid=None, seasonal_order_grid=None, n_splits=3):
+    def optimize(self, df, forecast_horizon=24, season_list=None, order_grid=None, seasonal_order_grid=None, n_splits=3, **kwargs):
         """
         Grid search untuk mencari kombinasi order dan seasonal_order terbaik berdasarkan MAE validasi.
+        season_list diterima agar interface konsisten, walau tidak digunakan.
         """
         order_grid = order_grid or [
             (1, 1, 1), (2, 1, 1), (1, 0, 1)
@@ -210,7 +210,8 @@ class SarimaModel(BaseForecastModel):
                 score=best_score
             )
             self.logger.info(f"SARIMA Champion: Params={best_params} | Score={best_score:.4f}")
-            return best_score, best_params, best_model_obj
+            # Penting: return 4 value agar kompatibel dengan pipeline otomatis
+            return best_score, best_params, best_model_obj, "sarima_run"
         else:
             self.logger.warning("No improved SARIMA model found during optimization.")
-            return float('inf'), None, None
+            return None, None, None, None
