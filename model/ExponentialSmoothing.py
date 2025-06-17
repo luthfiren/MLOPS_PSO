@@ -13,13 +13,24 @@ from pathlib import Path
 from model.base_model import BaseForecastModel
 
 class ExponentialSmoothingModel(BaseForecastModel):
-    def __init__(self, has_trend=False, seasonal_periods=12, seasonal_type='add', forecast_horizon=24, damped_trend=False, trend_type=None):
+    def __init__(
+        self,
+        has_trend=False,
+        seasonal_periods=12,
+        seasonal_type='add',
+        forecast_horizon=24,
+        damped_trend=False,
+        trend_type=None,
+        season_list=None,
+        **kwargs
+    ):
         self.has_trend = has_trend
         self.seasonal_periods = seasonal_periods
         self.seasonal_type = seasonal_type
         self.forecast_horizon = forecast_horizon
         self.damped_trend = damped_trend
         self.trend_type = trend_type
+        self.season_list = season_list
         self.model = None
         self.model_name = 'ExponentialSmoothingModel'
 
@@ -28,6 +39,7 @@ class ExponentialSmoothingModel(BaseForecastModel):
         self.champion_score_file = self.model_dir / "champion_score.txt"
         self.champion_config_file = self.model_dir / "champion_config.json"
         self.model_file = self.model_dir / f"{self.model_name}_champion.joblib"
+        self.mlflow_artifact_path = "champion_exponentialsmoothingmodel"
 
         self.logger = self._setup_logger()
         self.params = {
@@ -36,7 +48,7 @@ class ExponentialSmoothingModel(BaseForecastModel):
             "seasonal_type": self.seasonal_type,
             "forecast_horizon": self.forecast_horizon,
             "damped_trend": self.damped_trend,
-            "trend_type": self.trend_type
+            "trend_type": self.trend_type,
         }
 
     def _setup_logger(self):
@@ -69,9 +81,9 @@ class ExponentialSmoothingModel(BaseForecastModel):
                 model_smoothing_name = "Holt"
             elif self.seasonal_periods:
                 model = ExponentialSmoothing(
-                    train_series, 
-                    trend='add' if self.has_trend else None, 
-                    seasonal=self.seasonal_type, 
+                    train_series,
+                    trend='add' if self.has_trend else None,
+                    seasonal=self.seasonal_type,
                     seasonal_periods=self.seasonal_periods
                 ).fit(optimized=True)
                 model_smoothing_name = "ExponentialSmoothing"
@@ -81,8 +93,9 @@ class ExponentialSmoothingModel(BaseForecastModel):
             self.model = model
             forecast = model.forecast(len(test_series))
 
+            test_df = test_df.copy()
             test_df.loc[:, 'ds'] = pd.to_datetime(test_df['ds']).dt.tz_localize(None)
-            actual = test_df[test_df['ds'].isin(test_df['ds'])]['y'].values
+            actual = test_df['y'].values
 
             score = mean_absolute_error(actual, forecast)
             scores.append(score)
@@ -103,7 +116,6 @@ class ExponentialSmoothingModel(BaseForecastModel):
             h = pred_df.shape[0]
 
         forecast_values = self.model.forecast(steps=h)
-
         preds_df = pred_df.copy()
         preds_df = preds_df.iloc[:h].copy()
         preds_df["yhat"] = forecast_values.astype(float)
@@ -164,6 +176,7 @@ class ExponentialSmoothingModel(BaseForecastModel):
         return folds
 
     def optimize(self, df, forecast_horizon=24, season_list=None):
+        # Pastikan signature konsisten dengan pipeline!
         if not self.has_trend and (season_list is None or len(season_list) == 0):
             param_grid = ParameterGrid({
                 "forecast_horizon": [forecast_horizon],
@@ -209,7 +222,7 @@ class ExponentialSmoothingModel(BaseForecastModel):
                     best_model = model
 
             except Exception as e:
-                # self.logger.warning(f"Skipping params {params} due to error: {e}")
+                self.logger.warning(f"Skipping params {params} due to error: {e}")
                 continue
 
         if best_model:
@@ -220,5 +233,8 @@ class ExponentialSmoothingModel(BaseForecastModel):
                 score=best_score,
             )
             self.logger.info(f"Champion model and config saved to: {self.model_file}")
+            # Penting: return 4 value untuk pipeline otomatis!
+            return best_score, best_params, best_model, "exp_smoothing_run"
         else:
             self.logger.warning("No model improved the score")
+            return None, None, None, None
