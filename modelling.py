@@ -30,11 +30,17 @@ class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
         return joblib.load(context.artifacts["model_path"])
     def predict(self, context, model_input):
         model = self.load_context(context)
-        # NOTE: Pastikan signature .predict sesuai model kamu!
-        # Untuk statsmodels/forecasting, sesuaikan jika perlu
+        # Untuk statsforecast: cari signature .predict(h=..., X=...)
         if hasattr(model, "predict"):
-            # statsforecast/prophet: prediksi biasanya butuh DataFrame, bisa saja perlu tweak di sini
-            return model.predict(model_input)
+            import inspect
+            sig = inspect.signature(model.predict)
+            if "h" in sig.parameters:
+                # model_input harus dataframe future exog (X) atau None
+                h = len(model_input)
+                X = model_input.drop(columns=["ds", "unique_id", "y"], errors="ignore") if not model_input.empty else None
+                return model.predict(h=h, X=X)
+            else:
+                return model.predict(model_input)
         elif hasattr(model, "forecast"):
             return model.forecast(model_input)
         else:
