@@ -159,87 +159,6 @@ def save_pipeline_timing(timing_info, file_path="artifacts/pipeline_timings.json
     with open(file_path, "w") as f:
         json.dump(all_timings, f, indent=4)
     print(f"Pipeline timing saved to: {file_path}")
-
-def retrain_model(models_uri, train_data_path, target_column='value', experiment_name='RetrainExperiment'):
-    print(f"🚀 Starting retrain with model: {models_uri} and data: {train_data_path}")
-    mlflow.set_tracking_uri("http://localhost:5001")
-
-    if models_uri is None:
-        print("⚙️ No existing model URI provided. Running full MLOps pipeline...")
-        run_mlops_pipeline()
-        return
-
-    loaded_model = mlflow.pyfunc.load_model(model_uri=models_uri)
-    model = loaded_model._model_impl.load_context(loaded_model._model_impl._context)
-
-    train_df, val_df, test_df, _, full_df = load_and_preprocess_data(master_data_path=train_data_path, target_col=target_column)
-
-    is_statsforecast = hasattr(model, "fit") and hasattr(model, "predict") and hasattr(model, "models")
-
-    if is_statsforecast:
-        model.fit(train_df[["unique_id", "ds", "y"]])
-        forecast_val = model.predict(h=len(val_df)).rename(columns={'Theta': 'yhat'})
-        val_df['ds'] = pd.to_datetime(val_df['ds'])
-        forecast_val['ds'] = pd.to_datetime(forecast_val['ds'])
-        actual = pd.merge(
-            val_df[['ds', 'unique_id', 'y']],
-            forecast_val[['ds', 'unique_id', 'yhat']],
-            on=['ds', 'unique_id'],
-            how='inner'
-        )
-        mae_val = np.mean(np.abs(actual['y'] - actual['yhat']))
-    else:
-        X_train = train_df.drop(columns=['ds', 'unique_id', 'y'])
-        y_train = train_df['y']
-        model.fit(X_train, y_train)
-        X_val = val_df.drop(columns=['ds', 'unique_id', 'y'])
-        y_val_actual = val_df['y']
-        y_val_pred = model.predict(X_val)
-        mae_val = np.mean(np.abs(y_val_actual - y_val_pred))
-
-    print(f"📊 MAE on validation set: {mae_val:.4f}")
-
-    metrics_file = 'artifacts/metrics/model_metrics.json'
-    best_prev_mae = None
-    if os.path.exists(metrics_file):
-        with open(metrics_file, 'r') as f:
-            metrics_data = json.load(f)
-            if metrics_data:
-                metrics_data_sorted = sorted(metrics_data, key=lambda x: x['MAE'])
-                best_prev_mae = metrics_data_sorted[0]['MAE']
-                print(f"📁 Best previous MAE: {best_prev_mae:.4f}")
-
-    if best_prev_mae is None or mae_val < best_prev_mae:
-        print("✅ New retrained model is better. Running full MLOps pipeline to promote...")
-        run_mlops_pipeline()
-    else:
-        print("⚠️ Retrained model is not better. Generating forecast anyway for monitoring...")
-        if is_statsforecast:
-            forecast_result_df = model.predict(h=len(test_df)).rename(columns={'Theta': 'yhat'})
-            forecast_df = pd.DataFrame({'ds': forecast_result_df['ds'], 'yhat': forecast_result_df['yhat']})
-        else:
-            forecast_result_df = model.predict(test_df.drop(columns=['ds', 'unique_id', 'y']))
-            forecast_df = pd.DataFrame({'ds': test_df['ds'], 'yhat': forecast_result_df})
-        save_forecast_to_csv(forecast_df, full_df, "data/forecasts/latest_forecast.csv")
-
-    mlflow.set_experiment(experiment_name)
-    with mlflow.start_run(run_name=f"LatestRetrain-{datetime.now().isoformat()}") as run:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            model_path = f"{tmpdir}/model.pkl"
-            joblib.dump(model, model_path)
-
-            mlflow.pyfunc.log_model(
-                artifact_path="model",
-                python_model=JoblibModelWrapper(),
-                artifacts={"model_path": model_path},
-            )
-
-            mlflow.log_metric("MAE", mae_val)
-            mlflow.set_tag("model_name", "RetrainedModel")
-            mlflow.set_tag("retrain_date", datetime.now().isoformat())
-            mlflow.set_tag("promotion_decision", "promoted" if best_prev_mae is None or mae_val < best_prev_mae else "rejected")
-
-    print("📁 Latest retrained model and metrics logged to MLflow for audit.")
                                     
 def run_mlops_pipeline(
     master_data_path="processed_data/merged_data.csv",
@@ -391,6 +310,87 @@ def run_mlops_pipeline(
 #     print(f"Backend URI: {backend_uri}")
 #     return proc
 
+def retrain_model(models_uri, train_data_path, target_column='value', experiment_name='RetrainExperiment'):
+    print(f"🚀 Starting retrain with model: {models_uri} and data: {train_data_path}")
+    mlflow.set_tracking_uri("http://localhost:5001")
+
+    if models_uri is None:
+        print("⚙️ No existing model URI provided. Running full MLOps pipeline...")
+        run_mlops_pipeline()
+        return
+
+    loaded_model = mlflow.pyfunc.load_model(model_uri=models_uri)
+    model = loaded_model._model_impl.load_context(loaded_model._model_impl._context)
+
+    train_df, val_df, test_df, _, full_df = load_and_preprocess_data(master_data_path=train_data_path, target_col=target_column)
+
+    is_statsforecast = hasattr(model, "fit") and hasattr(model, "predict") and hasattr(model, "models")
+
+    if is_statsforecast:
+        model.fit(train_df[["unique_id", "ds", "y"]])
+        forecast_val = model.predict(h=len(val_df)).rename(columns={'Theta': 'yhat'})
+        val_df['ds'] = pd.to_datetime(val_df['ds'])
+        forecast_val['ds'] = pd.to_datetime(forecast_val['ds'])
+        actual = pd.merge(
+            val_df[['ds', 'unique_id', 'y']],
+            forecast_val[['ds', 'unique_id', 'yhat']],
+            on=['ds', 'unique_id'],
+            how='inner'
+        )
+        mae_val = np.mean(np.abs(actual['y'] - actual['yhat']))
+    else:
+        X_train = train_df.drop(columns=['ds', 'unique_id', 'y'])
+        y_train = train_df['y']
+        model.fit(X_train, y_train)
+        X_val = val_df.drop(columns=['ds', 'unique_id', 'y'])
+        y_val_actual = val_df['y']
+        y_val_pred = model.predict(X_val)
+        mae_val = np.mean(np.abs(y_val_actual - y_val_pred))
+
+    print(f"📊 MAE on validation set: {mae_val:.4f}")
+
+    metrics_file = 'artifacts/metrics/model_metrics.json'
+    best_prev_mae = None
+    if os.path.exists(metrics_file):
+        with open(metrics_file, 'r') as f:
+            metrics_data = json.load(f)
+            if metrics_data:
+                metrics_data_sorted = sorted(metrics_data, key=lambda x: x['MAE'])
+                best_prev_mae = metrics_data_sorted[0]['MAE']
+                print(f"📁 Best previous MAE: {best_prev_mae:.4f}")
+
+    if best_prev_mae is None or mae_val < best_prev_mae:
+        print("✅ New retrained model is better. Running full MLOps pipeline to promote...")
+        run_mlops_pipeline()
+    else:
+        print("⚠️ Retrained model is not better. Generating forecast anyway for monitoring...")
+        if is_statsforecast:
+            forecast_result_df = model.predict(h=len(test_df)).rename(columns={'Theta': 'yhat'})
+            forecast_df = pd.DataFrame({'ds': forecast_result_df['ds'], 'yhat': forecast_result_df['yhat']})
+        else:
+            forecast_result_df = model.predict(test_df.drop(columns=['ds', 'unique_id', 'y']))
+            forecast_df = pd.DataFrame({'ds': test_df['ds'], 'yhat': forecast_result_df})
+        save_forecast_to_csv(forecast_df, full_df, "data/forecasts/latest_forecast.csv")
+
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(run_name=f"LatestRetrain-{datetime.now().isoformat()}") as run:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = f"{tmpdir}/model.pkl"
+            joblib.dump(model, model_path)
+
+            mlflow.pyfunc.log_model(
+                artifact_path="model",
+                python_model=JoblibModelWrapper(),
+                artifacts={"model_path": model_path},
+            )
+
+            mlflow.log_metric("MAE", mae_val)
+            mlflow.set_tag("model_name", "RetrainedModel")
+            mlflow.set_tag("retrain_date", datetime.now().isoformat())
+            mlflow.set_tag("promotion_decision", "promoted" if best_prev_mae is None or mae_val < best_prev_mae else "rejected")
+
+    print("📁 Latest retrained model and metrics logged to MLflow for audit.")
+
 if __name__ == "__main__":
     args = parse_args()
     # proc = start_mlflow_server(port=5001)
@@ -409,7 +409,7 @@ if __name__ == "__main__":
             'unique_id': 'series_1'
         }).to_csv(master_data_path, index=False)
 
-    if args.mode == "retrain":
-        retrain_model(model_uri=args.model_uri, train_data_path=args.train_data)
-    else:
+    if args.mode != "retrain":
         run_mlops_pipeline(master_data_path=args.train_data, forecast_horizon=24)
+    else:
+        retrain_model(model_uri=args.model_uri, train_data_path=args.train_data)
