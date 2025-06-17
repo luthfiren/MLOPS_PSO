@@ -31,3 +31,11 @@
 2025-06-16 15:36:17,960 - ThetaModel - INFO - ThetaModel Average MAE across 3 folds = 8.2602, Training Time = 0.02 seconds
 2025-06-16 15:36:17,970 - ThetaModel - INFO - Saved champion model to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-4\test_model_lifecycle_ThetaMode0\model_champion.joblib
 2025-06-16 15:36:17,971 - ThetaModel - INFO - Saved champion config to C:\file aji\semester6\pso\MLOPS_PSO-9\model\champion_config.json
+2025-06-17 16:18:00,963 - ExponentialSmoothingModel - ExponentialSmoothing Average MAE across 3 folds = 9.3398, Training Time = 0.04 seconds
+2025-06-17 16:18:00,967 - ExponentialSmoothingModel - ExponentialSmoothing MAE=7.6692 with horizon=24
+2025-06-17 16:18:00,970 - ExponentialSmoothingModel - Saved champion model with params {'has_trend': False, 'seasonal_periods': 12, 'seasonal_type': 'add', 'forecast_horizon': 24, 'damped_trend': False, 'trend_type': None} to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-10\test_model_lifecycle_Exponenti0\model_champion.joblib
+2025-06-17 16:18:05,217 - SarimaModel - INFO - SarimaModel Average MAE across folds = 10.6827, Training Time = 4.24s
+2025-06-17 16:18:05,297 - SarimaModel - INFO - Model disimpan di C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-10\test_model_lifecycle_SarimaMod0\model_champion.joblib
+2025-06-17 16:18:05,322 - ThetaModel - INFO - ThetaModel Average MAE across 3 folds = 8.6940, Training Time = 0.02 seconds
+2025-06-17 16:18:05,332 - ThetaModel - INFO - Saved champion model to C:\Users\fajri\AppData\Local\Temp\pytest-of-fajri\pytest-10\test_model_lifecycle_ThetaMode0\model_champion.joblib
+2025-06-17 16:18:05,332 - ThetaModel - INFO - Saved champion config to C:\file aji\semester6\pso\MLOPS_PSO-11\model\champion_config.json
