@@ -198,14 +198,25 @@ jobs:
           if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
           # pip install -r requirement.txt
           # pip install jupyter mlflow
+
+      - name: Running preprocessing
+        run: python MLOPS_PSO/replacement_of_preprocessingipynb.py
       
-      - name: Start MLFLow server
+      - name: Start MLflow server
         run: |
+          source venv/bin/activate
           nohup mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlruns.db --default-artifact-root ./mlruns > mlflow.log 2>&1 &
+          for i in {1..30}; do
+            nc -z localhost 5000 && echo "MLflow ready!" && break
+            echo "Waiting for MLflow server... ($i/30)"
+            sleep 2
+          done
+          nc -z localhost 5000 || (echo "MLflow server failed to start"; cat mlflow.log; exit 1)
 
       - name: Run Conditional ML Pipeline
         run: |
           source venv/bin/activate
+          export MLFLOW_TRACKING_URI=http://localhost:5000
           if [ "${{ github.event.inputs.mode }}" = "true" ]; then
             python modelling.py --mode retrain
           else
