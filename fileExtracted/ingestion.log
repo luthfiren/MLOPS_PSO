@@ -2,3 +2,5 @@
 2025-06-04 12:34:40,980 INFO:Ingestion complete for extracting fingrid dataset. Rows written: 1440
 2025-06-04 12:35:34,579 INFO:Starting ingestion for file FMI 2025-04-05T05:34:37Z \u2192 2025-06-04T05:34:37Z
 2025-06-04 12:52:24,730 INFO:Starting ingestion for file FMI 2025-04-05T05:34:37Z \u2192 2025-06-04T05:34:37Z
+2025-06-18 02:56:28,597 INFO:Starting ingestion for 2025-06-04T05:34:37Z \u2192 2025-06-17T19:56:28Z for extracting fingrid dataset
+2025-06-18 02:56:31,015 INFO:Ingestion complete for extracting fingrid dataset. Rows written: 48
