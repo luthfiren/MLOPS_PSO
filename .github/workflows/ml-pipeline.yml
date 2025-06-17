@@ -1,3 +1,156 @@
+# name: ML Pipeline
+
+# on:
+#   workflow_dispatch: 
+#     inputs:
+#       mode:
+#         description: "Retrain model"
+#         required: false
+#         default: "false"
+#         type: choice
+#         options:
+#           - "true"
+#           - "false"
+ 
+#   push:
+#     branches: [ compilation_all ] 
+# env:
+#   AZURE_WEBAPP_NAME: electricity-market-forecasting
+
+# jobs:
+#   ml-lifecycle:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v3
+
+#       - name: Create .env file
+#         run: |
+#           echo "API_KEY=${{ secrets.API_KEY }}" >> .env
+#           echo "DB_HOST=localhost" >> .env
+#           echo "ANOTHER_VAR=example" >> .env
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v4
+#         with:
+#            python-version: '3.11'
+           
+#       - name: Install dependencies
+#         run: if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
+#           # pip install -r requirement.txt
+#           # pip install jupyter mlflow
+
+#       - name: Run Conditional ML Pipeline
+#         run: |
+#           if [ "${{ github.event.inputs.mode }}" = "true" ]; then
+#             python modelling.py --mode retrain
+#           else
+#             python modelling.py --mode run
+#           fi
+
+#       - name: Download Production Model from MLflow Registry
+#         # Meskipun tracking-nya "lokal" ke runner, Model Registry tetap berfungsi.
+#         # MLflow akan mencari 'mlruns/' yang dibuat oleh langkah sebelumnya
+#         # untuk menemukan model yang terdaftar (meskipun hanya dalam run ini).
+#         run: |
+#           mkdir -p ./publish/artifacts/models/ # Buat direktori di paket publish
+          
+#           # Coba unduh model versi 'Production'. Jika gagal, coba versi 'latest'.
+#           MODEL_NAME="ElectricityForecaster"
+#           MODEL_PATH="./publish/artifacts/models/deployed_model" # Lokasi model di paket deployment
+
+#           echo "Mencoba mengunduh model '$MODEL_NAME' versi 'Production'..."
+#           # Gunakan perintah `mlflow models download` atau `mlflow.pyfunc.save_model` (dari Python)
+#           # di sini untuk mengunduh model dari registry lokal (yang ada di folder mlruns saat ini).
+#           # Karena ini adalah environment GitHub Actions, kita bisa langsung pakai CLI
+          
+#           # Pastikan mlflow CLI tersedia di path.
+#           # Jika `mlflow models download` tidak bekerja, Anda bisa menggunakan `mlflow.pyfunc.save_model`
+#           # dari script Python terpisah yang dijalankan di sini.
+
+#           # --- Menggunakan mlflow.pyfunc.save_model dari python script dalam run step ---
+#           # Ini lebih andal karena menggunakan Python environment yang sama
+#           python -c "
+#           import mlflow
+#           import os
+
+#           MODEL_NAME = '$MODEL_NAME'
+#           MODEL_PATH = '$MODEL_PATH'
+
+#           try:
+#             print(f'Attempting to download production model: models:/{MODEL_NAME}/Production')
+#             mlflow.pyfunc.save_model(path=MODEL_PATH, mlflow_model_uri=f'models:/{MODEL_NAME}/Production')
+#             print('Production model downloaded successfully.')
+#           except Exception as e_prod:
+#             print(f'Failed to download production model ({e_prod}). Attempting to download latest version...')
+#             try:
+#               mlflow.pyfunc.save_model(path=MODEL_PATH, mlflow_model_uri=f'models:/{MODEL_NAME}/latest')
+#               print('Latest model downloaded successfully.')
+#             except Exception as e_latest:
+#               print(f'Error: Failed to download any version of model {MODEL_NAME} from MLflow Registry: {e_latest}')
+#               exit(1) # Gagal jika tidak ada model yang bisa diunduh
+#           "   
+          
+#       - name: Prepare Deployment Package
+#         run: |
+#           # Buat direktori 'publish' jika belum ada untuk mengumpulkan semua file yang diperlukan
+#           mkdir -p ./publish/data/forecasts/
+#           mkdir -p ./publish/artifacts/metrics/
+#           mkdir -p ./publish/templates/ # Untuk template HTML (misal: untuk Flask/Django)
+#           mkdir -p ./publish/static/ # Untuk file statis (CSS, JS, gambar)
+
+#           # Salin semua file aplikasi dan model yang diperlukan ke direktori 'publish'
+#           # Sesuaikan daftar file/folder ini dengan struktur proyek Python Anda
+#           cp app.py ./publish/
+#           cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
+#           cp templates/*.html/publish/templates/
+#           cp static/* ./publish/static/
+
+#           # Salin file data MASTER terbaru (dihasilkan oleh ingestion)
+#           cp data/master_electricity_prices.csv ./publish/data/
+
+#           # Salin artefak yang dihasilkan oleh modelling.py (latest_forecast.csv dan model_metrics.json)
+#           cp data/forecasts/latest_forecast.csv ./publish/data/forecasts/
+#           cp artifacts/metrics/model_metrics.json ./publish/artifacts/metrics/
+
+#       - name: Upload Application Artifact
+#         uses: actions/upload-artifact@v4
+#         with:
+#           # Nama artifact yang akan diunduh oleh job 'deploy'
+#           name: python-app
+#           # Path ke file .zip yang baru saja dibuat
+#           path: release.zip
+  
+#   deploy:
+#     name: Deploy to Azure
+#     runs-on: ubuntu-latest
+#     needs: [ml-lifecycle]
+
+#     steps:
+#         - uses: actions/checkout@v4
+
+#         - name: Download artifact
+#           uses: actions/download-artifact@v4
+#           with:
+#             name: webapp-package  
+#             path: ./downloaded-package
+
+#         - name: Deploy to Azure Web App
+#           uses: azure/webapps-deploy@v2
+#           with:
+#             app-name: ${{ env.AZURE_WEBAPP_NAME }}
+#             publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+#             package: ./downloaded-package
+#             # Pastikan startup command Anda memuat model dari path yang benar di dalam paket:
+#             # startup-command: gunicorn --bind 0.0.0.0 --timeout 600 app:app
+
+
+
+
+
+
+
 name: ML Pipeline
 
 on:
@@ -35,14 +188,20 @@ jobs:
         uses: actions/setup-python@v4
         with:
            python-version: '3.11'
+
+      - name: Create virtual environment
+        run: python -m venv venv
            
       - name: Install dependencies
-        run: if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
+        run: |
+          source venv/bin/activate
+          if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
           # pip install -r requirement.txt
           # pip install jupyter mlflow
 
       - name: Run Conditional ML Pipeline
         run: |
+          source venv/bin/activate
           if [ "${{ github.event.inputs.mode }}" = "true" ]; then
             python modelling.py --mode retrain
           else
@@ -54,6 +213,7 @@ jobs:
         # MLflow akan mencari 'mlruns/' yang dibuat oleh langkah sebelumnya
         # untuk menemukan model yang terdaftar (meskipun hanya dalam run ini).
         run: |
+          source venv/bin/activate
           mkdir -p ./publish/artifacts/models/ # Buat direktori di paket publish
           
           # Coba unduh model versi 'Production'. Jika gagal, coba versi 'latest'.
@@ -94,6 +254,7 @@ jobs:
           
       - name: Prepare Deployment Package
         run: |
+          source venv/bin/activate
           # Buat direktori 'publish' jika belum ada untuk mengumpulkan semua file yang diperlukan
           mkdir -p ./publish/data/forecasts/
           mkdir -p ./publish/artifacts/metrics/
@@ -144,6 +305,17 @@ jobs:
             package: ./downloaded-package
             # Pastikan startup command Anda memuat model dari path yang benar di dalam paket:
             # startup-command: gunicorn --bind 0.0.0.0 --timeout 600 app:app
+
+
+
+
+
+
+
+
+
+
+
 
 
   # deploy:
