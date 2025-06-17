@@ -1,149 +1,199 @@
-name: ML Pipeline
+name: ML Pipeline CI/CD (Containerized)
 
 on:
-  workflow_dispatch:  
+  # Event yang memicu workflow ini
+  workflow_dispatch: # Memungkinkan Anda menjalankan workflow secara manual dari GitHub Actions UI
   push:
-    branches: [ webadded ] 
+    branches:
+      - webadded # Workflow akan berjalan setiap kali ada push ke branch 'webadded'
+      # Anda bisa menambahkan branch lain di sini, misalnya: - main
+
 env:
-  AZURE_WEBAPP_NAME: your-azure-webapp-name # Ganti dengan nama Azure Web App Anda
-  AZURE_WEBAPP_RESOURCE_GROUP: MLOPS # Ganti dengan nama Resource Group Anda
-  AZURE_CONTAINER_REGISTRY: mlopspso.azurecr.io # Ganti dengan nama ACR Anda (misalnya, myacr.azurecr.io)
-  DOCKER_IMAGE_NAME: razialvaro/mlops-pso-alkaganteng # Nama Docker image Anda (misalnya, my-node-app)
-  DOCKER_IMAGE_TAG: ${{ github.sha }} # Menggunakan SHA commit sebagai tag image
+  # Variabel lingkungan global yang digunakan di seluruh workflow
+  AZURE_WEBAPP_NAME: mlops-pso-alkaganteng-app # <--- GANTI INI dengan nama App Service Anda di Azure
+  AZURE_WEBAPP_RESOURCE_GROUP: MLOPS           # <--- GANTI INI dengan nama Resource Group App Service Anda
+  AZURE_CONTAINER_REGISTRY: mlopspso.azurecr.io # <--- GANTI INI dengan nama Azure Container Registry Anda
+  DOCKER_IMAGE_NAME: razialvaro/mlops-pso-alkaganteng # Nama image di ACR (biasanya sama dengan nama repo)
+  DOCKER_IMAGE_TAG: latest # Menggunakan SHA commit sebagai tag unik untuk image Docker
+  # Anda juga bisa menambahkan tag 'latest' secara kondisional di langkah push Docker.
 
 jobs:
-  ml-lifecycle:
-    runs-on: ubuntu-latest
+  # Job pertama: Build ML pipeline, buat Docker image, dan push ke ACR
+  build-and-push-docker:
+    runs-on: ubuntu-latest # Runner yang digunakan untuk job ini
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v3 # Mengambil kode dari repository GitHub Anda
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
-           python-version: '3.11'
-           
-      - name: Install dependencies
+          python-version: '3.11' # Menentukan versi Python yang akan digunakan
+
+      - name: Install Python dependencies
         run: |
+          # Memasang semua dependensi dari requirement.txt
+          # Pastikan requirement.txt mencakup semua yang dibutuhkan, termasuk jupyter jika digunakan
           pip install -r requirement.txt
-          pip install jupyter
+          pip install jupyter # Memastikan jupyter terpasang untuk nbconvert
 
-      - name: Data Ingestion Fingrid & FMI
+      - name: Run Data Ingestion (Fingrid & FMI)
         run: |
+          echo "Starting data ingestion from Fingrid..."
           python importingDataFinGrid.py
+          echo "Starting data ingestion from FMI..."
           python importingDataFMI.py
+          echo "Data ingestion complete."
 
-      - name: Data Preprocessing
+      - name: Run Data Preprocessing
         run: |
-          jupyter nbconvert --to notebook --execute preprocessing.ipynb
-          
+          echo "Starting data preprocessing using preprocessing.ipynb..."
+          # Jalankan notebook Jupyper. Gunakan --inplace untuk menyimpan perubahan kembali ke notebook
+          # Jika notebook menghasilkan file output, pastikan lokasi penyimpanannya masuk ke konteks Dockerfile
+          jupyter nbconvert --to notebook --execute --inplace preprocessing.ipynb
+          echo "Data preprocessing complete."
+
       - name: Train and Evaluate ML Model
         run: |
-          python modelling.py # This assumes modelling.py will execute your training and evaluation logic
-          # If your modelling.py requires specific arguments or functions to be called,
-          # you might need to adjust this line. For example:
-          # python -c "from modelling import train_sarima_model; train_sarima_model()"
-          # Or if it has a main function:
-          # python -c "from modelling import main; main()"
-    
-      - name: Azure Login
+          echo "Starting ML model training and evaluation..."
+          # Asumsi modelling.py akan menjalankan logika training dan menyimpan model/artifacts yang diperlukan
+          python modelling.py
+          echo "ML model training and evaluation complete."
+          # Pastikan model yang terlatih atau artefak penting lainnya disimpan di lokasi yang akan
+          # dimasukkan ke dalam Docker image Anda (misalnya, di folder 'model/' atau 'artifacts/')
+
+      - name: Azure Login (Service Principal)
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }} # Menggunakan Service Principal untuk login ke Azure
-  
-      - name: Docker Login to ACR
-        run: az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY }}
-        # Perintah ini akan menggunakan kredensial Azure dari langkah 'Azure Login'
-        # untuk login ke ACR.
-  
+          # Login ke Azure menggunakan Service Principal (AZURE_CREDENTIALS)
+          # Pastikan AZURE_CREDENTIALS adalah secret GitHub Anda yang berisi JSON kredensial SP
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker Login to Azure Container Registry (ACR)
+        run: |
+          echo "Logging in to ACR: ${{ env.AZURE_CONTAINER_REGISTRY }}..."
+          # Perintah ini menggunakan kredensial Azure dari langkah 'Azure Login' untuk login ke ACR.
+          az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY }}
+          echo "Successfully logged in to ACR."
+
       - name: Build Docker Image
         run: |
+          echo "Building Docker image: ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} ..."
+          # Membangun Docker image dari Dockerfile di root repositori ('.').
+          # Tag image dengan nama ACR, nama image, dan SHA commit.
           docker build -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} .
-          # '.' di akhir berarti Dockerfile ada di root konteks build (root repo)
-          # '-t' untuk tag image
-  
-      # - name: Scan Docker Image (Opsional)
-      #   uses: aquasecurity/trivy-action@master
-      #   with:
-      #     image-ref: '${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}'
-      #     format: 'table'
-      #     exit-code: '1' # Gagal jika ada kerentanan (sesuaikan)
-      #     severity: 'CRITICAL,HIGH' # Hanya laporkan kerentanan Critical dan High
-  
+          echo "Docker image built successfully."
+
       - name: Push Docker Image to ACR
-        run: docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
-        # Mendorong image yang sudah di-tag ke ACR
+        run: |
+          echo "Pushing Docker image to ACR..."
+          # Mendorong image yang sudah di-tag ke ACR.
+          docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
+          echo "Docker image pushed to ACR successfully."
 
-          
-      # - name: Prepare Deployment Package
-      #   run: |
-      #     # Buat direktori 'publish' jika belum ada untuk mengumpulkan semua file yang diperlukan
-      #     mkdir -p ./publish/data/forecasts/
-      #     mkdir -p ./publish/artifacts/metrics/
-      #     mkdir -p ./publish/artifacts/models/ # Untuk model yang sudah dilatih
-      #     mkdir -p ./publish/templates/ # Untuk template HTML (misal: untuk Flask/Django)
-      #     mkdir -p ./publish/static/ # Untuk file statis (CSS, JS, gambar)
+      # --- OPSIONAL: Mendorong tag 'latest' secara kondisional ---
+      - name: Push 'latest' tag to ACR (Conditional)
+        if: github.ref == 'refs/heads/webadded' # Hanya dorong 'latest' jika ini dari branch 'webadded'
+        run: |
+          echo "Tagging and pushing 'latest' image for branch 'webadded'..."
+          # Tag image yang baru saja dibuat dengan 'latest'
+          docker tag ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+          # Dorong image dengan tag 'latest' ke ACR
+          docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+          echo "'latest' tag pushed to ACR."
 
-      #     # Salin semua file aplikasi dan model yang diperlukan ke direktori 'publish'
-      #     # Sesuaikan daftar file/folder ini dengan struktur proyek Python Anda
-      #     cp app.py ./publish/
-      #     cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
-      #     cp -r templates/ ./publish/
-      #     cp -r static/ ./publish/
-      #     # Salin model yang sudah dilatih (asumsi 'trained_model.pkl' dibuat oleh 'modelling.py')
-      #     cp -r model/ ./publish/
-
-      #     # Kompres seluruh isi direktori 'publish' menjadi satu file .zip
-      #     # Masuk ke direktori 'publish' terlebih dahulu agar isi zip berada langsung di root-nya.
-      #     cd publish
-      #     zip -r ../release.zip .
-      #     cd .. # Kembali ke direktori root repository
-
-      - name: Upload Application Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          # Nama artifact yang akan diunduh oleh job 'deploy'
-          name: python-app
-          # Path ke file .zip yang baru saja dibuat
-          path: release.zip
-
-  deploy:
+  # Job kedua: Deploy Docker image ke Azure Web App
+  deploy-to-webapp:
     runs-on: ubuntu-latest
-    # Job 'deploy' bergantung pada keberhasilan job 'ml-lifecycle'
-    needs: [ml-lifecycle]
+    needs: [build-and-push-docker] # Job ini akan berjalan hanya jika 'build-and-push-docker' berhasil
+
     environment:
-      # Mendefinisikan environment untuk deployment, berguna untuk proteksi dan URL preview
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+      name: 'Production' # Mendefinisikan lingkungan deployment (berguna untuk proteksi, URL, dll.)
+      url: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net # URL yang diharapkan dari App Service Anda
+
     permissions:
-      # Diperlukan untuk meminta JWT (JSON Web Token) jika menggunakan OIDC untuk autentikasi.
-      id-token: write
+      id-token: write # Diperlukan jika menggunakan OIDC untuk autentikasi ke Azure
+
     steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
+      - name: Azure Login (Service Principal)
+        uses: azure/login@v1
         with:
-          # Mengunduh artifact 'python-app' yang diunggah oleh job 'ml-lifecycle'
-          name: python-app
-          # File akan diunduh ke direktori kerja saat ini (yaitu './release.zip')
+          creds: ${{ secrets.AZURE_CREDENTIALS }} # Login ulang ke Azure menggunakan SP yang sama
 
-      - name: Verify downloaded artifact
-        run: ls # Untuk memverifikasi bahwa 'release.zip' ada setelah diunduh
-
-      # Langkah unzip ini mungkin tidak selalu diperlukan karena 'azure/webapps-deploy'
-      # action biasanya dapat langsung menerima file .zip sebagai input 'package'.
-      # Namun, kami menyertakannya sesuai dengan contoh yang Anda berikan.
-      # Jika 'package' diharapkan menunjuk ke folder yang tidak di-zip,
-      # maka 'unzip' diperlukan dan 'package' harus diubah ke path folder yang tidak di-zip.
-      - name: Unzip artifact for deployment
-        run: unzip release.zip
-
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2 # Gunakan v2 untuk publish-profile, atau v3 juga mendukung
-        id: deploy-to-webapp
+      - name: Deploy Docker Image to Azure Web App
+        uses: azure/webapps-deploy@v2 # Action untuk deployment ke Azure App Services
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          slot-name: 'Production'
-          package: './release.zip'
-          # TAMBAHKAN BARIS INI UNTUK MENGGUNAKAN PUBLISH PROFILE
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          app-name: ${{ env.AZURE_WEBAPP_NAME }} # Nama Azure Web App Anda
+          resource-group: ${{ env.AZURE_WEBAPP_RESOURCE_GROUP }} # Resource Group Azure Web App Anda
+          # Tentukan image Docker yang akan digunakan oleh App Service.
+          # Format: <ACR_URL>/<IMAGE_NAME>:<TAG>
+          images: |
+            ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
+          # startup-command: 'gunicorn --bind 0.0.0.0 --timeout 600 app:app' # Opsional: Jika Anda perlu menentukan perintah startup kustom untuk aplikasi Anda di dalam kontainer
+
+# --- PENTING UNTUK DIPERHATIKAN ---
+
+# 1. Pastikan `AZURE_WEBAPP_NAME` dan `AZURE_WEBAPP_RESOURCE_GROUP`
+#    DIUBAH dengan nilai yang benar sesuai dengan Azure App Service Anda.
+
+# 2. Azure Service Principal (`secrets.AZURE_CREDENTIALS`):
+#    Anda harus membuat Service Principal di Azure yang memiliki izin yang cukup
+#    untuk login (az login), mendorong ke ACR (AcrPush), dan mengelola App Service
+#    (Contributor pada Resource Group, atau peran spesifik lainnya).
+#    Simpan output JSON dari pembuatan Service Principal sebagai secret di GitHub Anda
+#    dengan nama `AZURE_CREDENTIALS`.
+#    Contoh pembuatan SP (di Azure CLI):
+#    az ad sp create-for-rbac --name "github-actions-sp" --role contributor \
+#      --scopes /subscriptions/<subscription-id>/resourceGroups/<your-resource-group> \
+#      --json-auth-output > my_sp_credentials.json
+
+# 3. Konfigurasi Azure Web App untuk Kontainer:
+#    Azure App Service Anda harus dikonfigurasi untuk menjalankan kontainer Docker (Linux App Service).
+#    Aplikasi Anda harus dikonfigurasi untuk menarik image dari Azure Container Registry (ACR) Anda.
+#    Ada dua cara utama untuk otentikasi App Service ke ACR:
+#    a. Managed Identity (DISARANKAN): Aktifkan System-Assigned Managed Identity pada App Service Anda,
+#       lalu berikan peran 'AcrPull' pada Managed Identity tersebut di ACR Anda.
+#    b. Admin User ACR: Aktifkan Admin User di ACR Anda, lalu masukkan username dan password
+#       ACR tersebut di pengaturan aplikasi App Service Anda (`DOCKER_REGISTRY_SERVER_USERNAME`, `DOCKER_REGISTRY_SERVER_PASSWORD`).
+#       Opsi ini kurang aman dan tidak disarankan untuk produksi.
+
+# 4. Dockerfile Anda:
+#    Pastikan ada file bernama `Dockerfile` di root repositori Anda.
+#    Dockerfile ini harus berisi instruksi untuk membangun image Docker yang berisi
+#    aplikasi Python ML Anda (termasuk kode, dependensi, model terlatih, dll.).
+#    Contoh sederhana Dockerfile:
+#    ```dockerfile
+#    # Gunakan base image Python yang sesuai
+#    FROM python:3.11-slim-buster
+
+#    # Atur direktori kerja di dalam kontainer
+#    WORKDIR /app
+
+#    # Salin requirement.txt dan instal dependensi
+#    COPY requirements.txt .
+#    RUN pip install --no-cache-dir -r requirements.txt
+
+#    # Salin semua kode aplikasi Anda (dan model/data yang diperlukan)
+#    COPY . .
+
+#    # Paparkan port tempat aplikasi Anda akan berjalan (misal: Flask/FastAPI biasanya 5000/8000)
+#    EXPOSE 8000 # Ganti jika aplikasi Anda berjalan di port lain
+
+#    # Perintah untuk menjalankan aplikasi saat kontainer dimulai
+#    # Ganti dengan perintah yang sesuai untuk aplikasi Anda (misal: Gunicorn, Uvicorn, Flask run)
+#    # Contoh untuk Gunicorn dengan aplikasi Flask bernama 'app.py' dan objek Flask 'app':
+#    # CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app"]
+#    # Contoh untuk Uvicorn dengan aplikasi FastAPI bernama 'main.py' dan objek FastAPI 'app':
+#    # CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+#    # Jika aplikasi Anda hanya script Python, misal: python app.py
+#    # CMD ["python", "app.py"]
+#    # Jika aplikasi Anda adalah Flask, dan Anda punya app.py di root:
+#    CMD ["python", "app.py"]
+#    ```
+
+# 5. File-file Python/ML Anda:
+#    Pastikan `importingDataFinGrid.py`, `importingDataFMI.py`, `preprocessing.ipynb`, dan `modelling.py`
+#    berada di lokasi yang benar di repository dan berfungsi sesuai harapan.
+#    Jika `preprocessing.ipynb` atau `modelling.py` menghasilkan file (misal: model, data hasil preprocessing),
+#    pastikan file-file tersebut juga disalin ke dalam Docker image Anda melalui Dockerfile.
