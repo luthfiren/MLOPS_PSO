@@ -5,7 +5,7 @@ import os
 import json
 import base64
 from io import BytesIO
-from flask import Flask, render_template, redirect, url_for
+from flask import Flask, render_template, redirect, url_for, jsonify
 import importlib
 from datetime import datetime, timezone
 import requests
@@ -193,7 +193,7 @@ def trigger_github_action(mode="true"):
     }
 
     data = {
-        "ref": "master",  # or your deployment branch
+        "ref": "compilation_all",  # or your deployment branch
         "inputs": {
             "mode": mode
         }
@@ -204,9 +204,10 @@ def trigger_github_action(mode="true"):
     if response.status_code == 204:
         print(f"✅ Workflow '{WORKFLOW_ID}' triggered successfully on branch '{REF_BRANCH}'.")
     else:
-        print(f"❌ Failed to trigger workflow: {response.status_code} - {response.text}")
-        response.raise_for_status()   
-         
+        print(f"❌ Failed to trigger workflow: {response.status_code}")
+        print("Response content:\n", response.text)  # <- Shows you the *actual* HTML or error body
+        response.raise_for_status()
+                
 # ====================================================================================================
 # APLIKASI FLASK
 # ====================================================================================================
@@ -244,7 +245,8 @@ def predict():
         last_ingestion_time = importingDataFingrid.load_last_success_time()
         now = datetime.now(timezone.utc)
 
-        if last_ingestion_time.date() != now.date():
+        if (now - last_ingestion_time).total_seconds() > 1:
+            print("triggered")
             trigger_github_action()
 
             forecast_path = "data/forecasts/latest_forecast.csv"
@@ -253,36 +255,24 @@ def predict():
             elapsed = 0
 
             while elapsed < timeout:
+                now = datetime.now(timezone.utc)  # ✅ Refresh `now` in every iteration
                 if os.path.exists(forecast_path):
                     file_mod_time = datetime.fromtimestamp(os.path.getmtime(forecast_path), tz=timezone.utc)
-                    if file_mod_time.date() == now.date():
+                    print(f"[Polling] File mod time: {file_mod_time}, Now: {now}, Age: {(now - file_mod_time).total_seconds()}s")
+                    if (now - file_mod_time).total_seconds() <= 300:  # ✅ Only break if file is <=5 min fresh
+                        print("✅ New forecast file detected.")
                         break
+
                 time.sleep(polling_interval)
                 elapsed += polling_interval
 
             else:
                 raise TimeoutError("Timeout waiting for new forecast file.")
-
-        return redirect(url_for('dashboard'))
+            
+        return jsonify({"message": "Prediction completed successfully"}), 200
 
     except Exception as e:
-        # Generate plots same as in dashboard() to maintain consistency
-        forecast_file = 'data/forecasts/latest_forecast.csv'
-        historical_actuals_file = 'data/historical_actuals.csv'
-        metrics_file = 'artifacts/metrics/sarima_metrics.json'
-        timings_file = 'artifacts/pipeline_timings.json'
-
-        plot_forecast_vs_actual_img = plot_forecast_vs_actual(forecast_file, historical_actuals_file)
-        plot_mae_trend_img = plot_mae_trend(metrics_file)
-        plot_pipeline_timings_img = plot_pipeline_timings(timings_file)
-
-        return render_template(
-            'index.html',
-            plot_forecast_vs_actual=plot_forecast_vs_actual_img,
-            plot_mae_trend=plot_mae_trend_img,
-            plot_pipeline_timings=plot_pipeline_timings_img,
-            error=str(e)
-        ), 500
+        return jsonify({"error": str(e)}), 500
 
     
 # ====================================================================================================

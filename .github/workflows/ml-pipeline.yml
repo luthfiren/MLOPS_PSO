@@ -13,7 +13,7 @@ on:
           - "false"
  
   push:
-    branches: [ webadded ] 
+    branches: [ compilation_all ] 
 env:
   AZURE_WEBAPP_NAME: electricity-market-forecasting
 
