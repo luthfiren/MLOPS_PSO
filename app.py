@@ -179,7 +179,7 @@ def plot_pipeline_timings(timings_file='artifacts/pipeline_timings.json', daily_
         print(f"Terjadi error saat membuat plot waktu pipeline: {e}")
         return None
     
-def trigger_github_action():
+def trigger_github_action(mode="true"):
     GITHUB_TOKEN = os.getenv("API_KEY")  # 🔐 Should be stored in environment (.env or CI/CD Secrets)
     if not GITHUB_TOKEN:
         raise ValueError("API_KEY environment variable is not set")
@@ -193,7 +193,10 @@ def trigger_github_action():
     }
 
     data = {
-        "ref": "master"  # or your deployment branch
+        "ref": "master",  # or your deployment branch
+        "inputs": {
+            "mode": mode
+        }
     }
 
     response = requests.post(API_URL, headers=headers, json=data)

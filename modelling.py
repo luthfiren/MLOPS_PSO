@@ -4,7 +4,17 @@ import json
 import os
 import mlflow
 import joblib
+import tempfile
+import argparse
 from datetime import datetime
+
+# --- parse action ---
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run or retrain MLOps pipeline.")
+    parser.add_argument("--mode", choices=["run", "retrain"], default="run", help="Pipeline mode: run or retrain")
+    parser.add_argument("--model-uri", type=str, default="models:/ElectricityPriceForecaster/Production")
+    parser.add_argument("--train-data", type=str, default="data/master_electricity_prices.csv")
+    return parser.parse_args()
 
 # --- Dynamic Model Discovery ---
 from model import discover_model_classes
@@ -81,6 +91,28 @@ def save_metrics_to_json(metrics_dict, file_path="artifacts/metrics/model_metric
         json.dump(all_metrics, f, indent=4)
     print(f"Metrik model disimpan ke: {file_path}")
 
+def retrain_model(model_uri, train_data_path, target_column='value', experiment_name='RetrainExperiment'):
+    print(f"Starting retrain with model: {model_uri} and data: {train_data_path}")
+    loaded_model = mlflow.pyfunc.load_model(model_uri)
+    model = loaded_model._model_impl.load_context(loaded_model._model_impl._context)
+
+    train_data = pd.read_csv(train_data_path)
+    X = train_data.drop(columns=[target_column])
+    y = train_data[target_column]
+    model.fit(X, y)
+
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(run_name=f"Retraining-{datetime.now().isoformat()}"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = f"{tmpdir}/model.pkl"
+            joblib.dump(model, model_path)
+
+            mlflow.pyfunc.log_model(
+                artifact_path="model",
+                python_model=JoblibModelWrapper(),
+                artifacts={"model_path": model_path},
+            )
+                            
 def run_mlops_pipeline(
     master_data_path="data/master_electricity_prices.csv",
     forecast_horizon=24,
@@ -210,20 +242,25 @@ def run_mlops_pipeline(
         print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
 
 if __name__ == "__main__":
+    args = parse_args()
+
     os.makedirs('data', exist_ok=True)
     os.makedirs('data/forecasts', exist_ok=True)
     os.makedirs('artifacts/metrics', exist_ok=True)
     os.makedirs('artifacts/models', exist_ok=True)
     os.makedirs('artifacts', exist_ok=True)
+    
     master_data_path = 'data/master_electricity_prices.csv'
+    
     if not os.path.exists(master_data_path):
-        print("Membuat data dummy master_electricity_prices.csv untuk pengujian lokal...")
+        print("Creating dummy master_electricity_prices.csv...")
         pd.DataFrame({
             'timestamp': pd.date_range('2024-01-01', periods=200, freq='H'),
-            'value': np.random.rand(200)*100,
+            'value': np.random.rand(200) * 100,
             'unique_id': 'series_1'
         }).to_csv(master_data_path, index=False)
-    run_mlops_pipeline(
-        master_data_path=master_data_path,
-        forecast_horizon=24 
-    )
+
+    if args.mode == "retrain":
+        retrain_model(model_uri=args.model_uri, train_data_path=args.train_data)
+    else:
+        run_mlops_pipeline(master_data_path=args.train_data, forecast_horizon=24)

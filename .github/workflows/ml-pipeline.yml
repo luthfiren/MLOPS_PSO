@@ -1,7 +1,17 @@
 name: ML Pipeline
 
 on:
-  workflow_dispatch:  
+  workflow_dispatch: 
+    inputs:
+      mode:
+        description: "Retrain model"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+ 
   push:
     branches: [ webadded ] 
 env:
@@ -31,9 +41,13 @@ jobs:
           pip install -r requirement.txt
           pip install jupyter mlflow
 
-      - name: Run ML Pipeline (Ingestion, Preprocessing, Trainng, MLFlow logging)
+      - name: Run Conditional ML Pipeline
         run: |
-          python imodelling.py
+          if [ "${{ github.event.inputs.mode }}" = "true" ]; then
+            python modelling.py --mode retrain
+          else
+            python modelling.py --mode run
+          fi
 
       - name: Download Production Model from MLflow Registry
         # Meskipun tracking-nya "lokal" ke runner, Model Registry tetap berfungsi.
