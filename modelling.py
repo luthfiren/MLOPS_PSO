@@ -40,7 +40,7 @@ class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
         else:
             raise RuntimeError("Model does not support predict/forecast")
 
-def load_and_preprocess_data(master_data_path="data/master_electricity_prices.csv", target_col="value"):
+def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", target_col="value"):
     df = pd.read_csv(master_data_path)
     df["ds"] = pd.to_datetime(df["timestamp"])
     df = df.rename(columns={target_col: 'y'})
