@@ -207,18 +207,18 @@ jobs:
       - name: Start MLflow server
         run: |
           source venv/bin/activate
-          nohup mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlruns.db --default-artifact-root ./mlruns > mlflow.log 2>&1 &
+          nohup mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri sqlite:///mlruns.db --default-artifact-root ./mlruns > mlflow.log 2>&1 &
           for i in {1..30}; do
-            nc -z localhost 5000 && echo "MLflow ready!" && break
+            nc -z localhost 5001 && echo "MLflow ready!" && break
             echo "Waiting for MLflow server... ($i/30)"
             sleep 2
           done
-          nc -z localhost 5000 || (echo "MLflow server failed to start"; cat mlflow.log; exit 1)
+          nc -z localhost 5001 || (echo "MLflow server failed to start"; cat mlflow.log; exit 1)
 
       - name: Run Conditional ML Pipeline
         run: |
           source venv/bin/activate
-          export MLFLOW_TRACKING_URI=http://localhost:5000
+          export MLFLOW_TRACKING_URI=http://localhost:5001
           if [ "${{ github.event.inputs.mode }}" = "true" ]; then
             python modelling.py --mode retrain
           else
@@ -255,18 +255,25 @@ jobs:
           MODEL_NAME = '$MODEL_NAME'
           MODEL_PATH = '$MODEL_PATH'
 
+          def download_model(uri, dst):
+              # Load model from registry
+              model = mlflow.pyfunc.load_model(model_uri=uri)
+              # Save model to local directory
+              mlflow.pyfunc.save_model(path=dst, python_model=model._model_impl)
+              print(f'Model downloaded from {uri} and saved to {dst}')
+
           try:
-            print(f'Attempting to download production model: models:/{MODEL_NAME}/Production')
-            mlflow.pyfunc.save_model(path=MODEL_PATH, mlflow_model_uri=f'models:/{MODEL_NAME}/Production')
-            print('Production model downloaded successfully.')
+              print(f'Attempting to download production model: models:/{MODEL_NAME}/Production')
+              download_model(f'models:/{MODEL_NAME}/Production', MODEL_PATH)
+              print('Production model downloaded successfully.')
           except Exception as e_prod:
-            print(f'Failed to download production model ({e_prod}). Attempting to download latest version...')
-            try:
-              mlflow.pyfunc.save_model(path=MODEL_PATH, mlflow_model_uri=f'models:/{MODEL_NAME}/latest')
-              print('Latest model downloaded successfully.')
-            except Exception as e_latest:
-              print(f'Error: Failed to download any version of model {MODEL_NAME} from MLflow Registry: {e_latest}')
-              exit(1) # Gagal jika tidak ada model yang bisa diunduh
+              print(f'Failed to download production model ({e_prod}). Attempting to download latest version...')
+              try:
+                  download_model(f'models:/{MODEL_NAME}/latest', MODEL_PATH)
+                  print('Latest model downloaded successfully.')
+              except Exception as e_latest:
+                  print(f'Error: Failed to download any version of model {MODEL_NAME} from MLflow Registry: {e_latest}')
+                  exit(1)
           "   
           
       - name: Prepare Deployment Package

@@ -391,7 +391,7 @@ def start_mlflow_server(
 if __name__ == "__main__":
     args = parse_args()
     proc = start_mlflow_server()
-    mlflow.set_tracking_uri("http://localhost:5000")
+    mlflow.set_tracking_uri("http://localhost:5001")
 
     # Ensure all required directories exist
     for d in ['data', 'data/forecasts', 'artifacts/metrics', 'artifacts/models', 'artifacts', 'processed_data']:
