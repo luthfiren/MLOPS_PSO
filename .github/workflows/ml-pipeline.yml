@@ -195,7 +195,7 @@ jobs:
       - name: Install dependencies
         run: |
           source venv/bin/activate
-          if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           # pip install -r requirement.txt
           # pip install jupyter mlflow
 
@@ -281,7 +281,8 @@ jobs:
           # Salin semua file aplikasi dan model yang diperlukan ke direktori 'publish'
           # Sesuaikan daftar file/folder ini dengan struktur proyek Python Anda
           cp app.py ./publish/
-          cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
+          # cp requirement.txt ./publish/ # Menggunakan requirement.txt sesuai file Anda
+          cp requirements.txt ./publish/ # Menggunakan requirements.txt sesuai file Anda
           cp templates/*.html/publish/templates/
           cp static/* ./publish/static/
 
