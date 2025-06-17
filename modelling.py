@@ -105,19 +105,34 @@ def retrain_model(model_uri, train_data_path, target_column='value', experiment_
     loaded_model = mlflow.pyfunc.load_model(model_uri)
     model = loaded_model._model_impl.load_context(loaded_model._model_impl._context)
 
-    # ⚠️ PROPER SPLIT: Prepare train/val/test properly FIRST
+    # Prepare splits
     train_df, val_df, test_df, _, full_df = load_and_preprocess_data(master_data_path=train_data_path, target_col=target_column)
 
-    # ✅ Train ONLY on train_df
-    X_train = train_df.drop(columns=['ds', 'unique_id', 'y'])
-    y_train = train_df['y']
-    model.fit(X_train, y_train)
+    # --- Detect model type ---
+    is_statsforecast = hasattr(model, "fit") and hasattr(model, "predict") and hasattr(model, "models")  # crude but effective
 
-    # ✅ Validation
-    X_val = val_df.drop(columns=['ds', 'unique_id', 'y'])
-    y_val_actual = val_df['y']
-    y_val_pred = model.predict(X_val)
-    mae_val = np.mean(np.abs(y_val_actual - y_val_pred))
+    if is_statsforecast:
+        # statsforecast API
+        model.fit(train_df[["unique_id", "ds", "y"]])
+        forecast_val = model.predict(h=len(val_df)).rename(columns={'Theta': 'yhat'})
+        val_df['ds'] = pd.to_datetime(val_df['ds'])
+        forecast_val['ds'] = pd.to_datetime(forecast_val['ds'])
+        actual = pd.merge(
+            val_df[['ds', 'unique_id', 'y']],
+            forecast_val[['ds', 'unique_id', 'yhat']],
+            on=['ds', 'unique_id'],
+            how='inner'
+        )
+        mae_val = np.mean(np.abs(actual['y'] - actual['yhat']))
+    else:
+        # scikit-learn API
+        X_train = train_df.drop(columns=['ds', 'unique_id', 'y'])
+        y_train = train_df['y']
+        model.fit(X_train, y_train)
+        X_val = val_df.drop(columns=['ds', 'unique_id', 'y'])
+        y_val_actual = val_df['y']
+        y_val_pred = model.predict(X_val)
+        mae_val = np.mean(np.abs(y_val_actual - y_val_pred))
 
     print(f"📊 MAE on validation set: {mae_val:.4f}")
 
@@ -138,8 +153,12 @@ def retrain_model(model_uri, train_data_path, target_column='value', experiment_
         run_mlops_pipeline()
     else:
         print("⚠️ Retrained model is not better. Generating forecast anyway for monitoring...")
-        forecast_result_df = model.predict(test_df.drop(columns=['ds', 'unique_id', 'y']))
-        forecast_df = pd.DataFrame({'ds': test_df['ds'], 'yhat': forecast_result_df})
+        if is_statsforecast:
+            forecast_result_df = model.predict(h=len(test_df)).rename(columns={'Theta': 'yhat'})
+            forecast_df = pd.DataFrame({'ds': forecast_result_df['ds'], 'yhat': forecast_result_df['yhat']})
+        else:
+            forecast_result_df = model.predict(test_df.drop(columns=['ds', 'unique_id', 'y']))
+            forecast_df = pd.DataFrame({'ds': test_df['ds'], 'yhat': forecast_result_df})
         save_forecast_to_csv(forecast_df, full_df, "data/forecasts/latest_forecast.csv")
 
     # 📦 Always log retrained model + metrics to MLflow (under 'LatestRetrainAttempt')
