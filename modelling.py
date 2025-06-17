@@ -3,7 +3,6 @@ import pandas as pd
 import json
 import os
 import subprocess
-import signal
 import mlflow
 import joblib
 import tempfile
@@ -288,7 +287,7 @@ def run_mlops_pipeline(
         mlflow.log_param("pipeline_end_time", datetime.now().isoformat())
         print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
 
-def start_mlflow_server(port=8110, backend_uri="sqlite:///mlruns.db", artifact_root="./mlruns"):
+def start_mlflow_server(port=5000, backend_uri="sqlite:///mlruns.db", artifact_root="./mlruns"):
     cmd = [
         "mlflow", "server",
         "--host", "0.0.0.0",
