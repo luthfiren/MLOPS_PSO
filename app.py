@@ -10,6 +10,9 @@ import importlib
 from datetime import datetime, timezone
 import requests
 import time
+from dotenv import load_dotenv
+load_dotenv()
+
 
 # --- IMpor modul-modul dari modelling.py yang relevan jika app.py juga melakukan prediksi real-time ---
 # CATATAN: Untuk dashboard monitoring, app.py biasanya HANYA MEMBACA hasil dari modelling.py.
@@ -177,7 +180,9 @@ def plot_pipeline_timings(timings_file='artifacts/pipeline_timings.json', daily_
         return None
     
 def trigger_github_action():
-    GITHUB_TOKEN = "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"  # ⚠️ Store securely (use environment variables in production)
+    GITHUB_TOKEN = os.getenv("API_KEY")  # 🔐 Should be stored in environment (.env or CI/CD Secrets)
+    if not GITHUB_TOKEN:
+        raise ValueError("API_KEY environment variable is not set")
     REPO = "luthfiren/MLOPS_PSO"
     WORKFLOW_ID = "ml-pipeline.yml"  # or file name of your workflow in .github/workflows/
     API_URL = f"https://api.github.com/repos/{REPO}/actions/workflows/{WORKFLOW_ID}/dispatches"
@@ -192,8 +197,13 @@ def trigger_github_action():
     }
 
     response = requests.post(API_URL, headers=headers, json=data)
-    response.raise_for_status()  # Raises error if failed
     
+    if response.status_code == 204:
+        print(f"✅ Workflow '{WORKFLOW_ID}' triggered successfully on branch '{REF_BRANCH}'.")
+    else:
+        print(f"❌ Failed to trigger workflow: {response.status_code} - {response.text}")
+        response.raise_for_status()   
+         
 # ====================================================================================================
 # APLIKASI FLASK
 # ====================================================================================================
