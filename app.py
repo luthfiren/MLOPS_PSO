@@ -202,6 +202,30 @@ def dashboard():
         plot_pipeline_timings=plot_pipeline_timings_img
     )
 
+from flask import request, jsonify
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    """
+    Placeholder API endpoint for triggering predictions.
+    In the future, integrate with real prediction functions.
+    """
+    try:
+        # Example: You can parse JSON payload if needed
+        # data = request.get_json()
+        # features = data.get("features")
+
+        # Dummy result for now
+        result = {
+            "status": "success",
+            "message": "Prediction triggered successfully.",
+            "prediction": None  # Fill this later with real prediction result
+        }
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 # ====================================================================================================
 # BLOK EKSEKUSI UTAMA (untuk menjalankan aplikasi Flask)
 # ====================================================================================================
