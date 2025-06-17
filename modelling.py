@@ -30,22 +30,28 @@ class JoblibModelWrapper(mlflow.pyfunc.PythonModel):
         return joblib.load(context.artifacts["model_path"])
     def predict(self, context, model_input):
         model = self.load_context(context)
-        # Untuk statsforecast: cari signature .predict(h=..., X=...)
+        import inspect
+
+        # statsforecast: check if predict expects "h"
         if hasattr(model, "predict"):
-            import inspect
             sig = inspect.signature(model.predict)
+            # statsforecast models: predict(h=...)
             if "h" in sig.parameters:
-                # model_input harus dataframe future exog (X) atau None
                 h = len(model_input)
-                X = model_input.drop(columns=["ds", "unique_id", "y"], errors="ignore") if not model_input.empty else None
-                return model.predict(h=h, X=X)
+                # For statsforecast, only pass X if the signature has X; otherwise, only pass h
+                if "X" in sig.parameters:
+                    X = model_input.drop(columns=["ds", "unique_id", "y"], errors="ignore") if not model_input.empty else None
+                    return model.predict(h=h, X=X)
+                else:
+                    return model.predict(h=h)
             else:
+                # scikit-learn or others
                 return model.predict(model_input)
         elif hasattr(model, "forecast"):
             return model.forecast(model_input)
         else:
             raise RuntimeError("Model does not support predict/forecast")
-
+        
 def load_and_preprocess_data(master_data_path="processed_data/merged_data.csv", target_col="value"):
     df = pd.read_csv(master_data_path)
     df["ds"] = pd.to_datetime(df["timestamp"])
@@ -137,12 +143,15 @@ def retrain_model(model_uri, train_data_path, target_column='value', experiment_
     train_df, val_df, test_df, _, full_df = load_and_preprocess_data(master_data_path=train_data_path, target_col=target_column)
 
     # --- Detect model type ---
-    is_statsforecast = hasattr(model, "fit") and hasattr(model, "predict") and hasattr(model, "models")  # crude but effective
+    is_statsforecast = hasattr(model, "fit") and hasattr(model, "predict") and hasattr(model, "models")
 
     if is_statsforecast:
         # statsforecast API
         model.fit(train_df[["unique_id", "ds", "y"]])
-        forecast_val = model.predict(h=len(val_df)).rename(columns={'Theta': 'yhat'})
+        forecast_val = model.predict(h=len(val_df))
+        # Rename prediction column if needed
+        if 'Theta' in forecast_val.columns and 'yhat' not in forecast_val.columns:
+            forecast_val = forecast_val.rename(columns={'Theta': 'yhat'})
         val_df['ds'] = pd.to_datetime(val_df['ds'])
         forecast_val['ds'] = pd.to_datetime(forecast_val['ds'])
         actual = pd.merge(
@@ -154,16 +163,16 @@ def retrain_model(model_uri, train_data_path, target_column='value', experiment_
         mae_val = np.mean(np.abs(actual['y'] - actual['yhat']))
     else:
         # scikit-learn API
-        X_train = train_df.drop(columns=['ds', 'unique_id', 'y'])
+        X_train = train_df.drop(columns=['ds', 'unique_id', 'y'], errors='ignore')
         y_train = train_df['y']
         model.fit(X_train, y_train)
-        X_val = val_df.drop(columns=['ds', 'unique_id', 'y'])
+        X_val = val_df.drop(columns=['ds', 'unique_id', 'y'], errors='ignore')
         y_val_actual = val_df['y']
         y_val_pred = model.predict(X_val)
         mae_val = np.mean(np.abs(y_val_actual - y_val_pred))
 
     print(f"📊 MAE on validation set: {mae_val:.4f}")
-
+    
     # Load the best previous model MAE from metrics
     metrics_file = 'artifacts/metrics/model_metrics.json'
     best_prev_mae = None
