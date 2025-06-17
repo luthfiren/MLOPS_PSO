@@ -13,7 +13,7 @@ from datetime import datetime
 def parse_args():
     parser = argparse.ArgumentParser(description="Run or retrain MLOps pipeline.")
     parser.add_argument("--mode", choices=["run", "retrain"], default="run", help="Pipeline mode: run or retrain")
-    parser.add_argument("--model-uri", type=str, default="models:/ElectricityForecaster/Production")
+    parser.add_argument("--model-uri", type=str, default="models:/ElectricityPriceForecaster/Production")
     parser.add_argument("--train-data", type=str, default="data/master_electricity_prices.csv")
     return parser.parse_args()
 
@@ -247,10 +247,10 @@ def run_mlops_pipeline(
         model_uri_to_register = f"runs:/{run_id}/{overall_best['artifact_path']}"
         mlflow.register_model(
             model_uri=model_uri_to_register,
-            name="ElectricityForecaster",
+            name="ElectricityPriceForecaster",
             tags={"project": "MLOps_Finland_Electricity", "source_pipeline_run": pipeline_run.info.run_id}
         )
-        print(f"Model '{overall_best['name']}' versi terbaru didaftarkan sebagai 'ElectricityForecaster' di MLflow Model Registry.")
+        print(f"Model '{overall_best['name']}' versi terbaru didaftarkan sebagai 'ElectricityPriceForecaster' di MLflow Model Registry.")
 
         # 5. Forecasting & Simpan Hasil
         print("Melakukan forecasting dan menyimpan hasil untuk dashboard...")
@@ -266,12 +266,12 @@ def run_mlops_pipeline(
         future_input_df['y'] = np.nan
 
         try:
-            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/Production")
-            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Production Stage).")
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityPriceForecaster/Production")
+            print("Memuat model 'ElectricityPriceForecaster' dari MLflow Model Registry (Production Stage).")
         except Exception as e:
             print(f"Gagal memuat model Production: {e}. Mencoba memuat versi terbaru yang terdaftar.")
-            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/latest")
-            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Versi Terbaru).")
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityPriceForecaster/latest")
+            print("Memuat model 'ElectricityPriceForecaster' dari MLflow Model Registry (Versi Terbaru).")
 
         forecast_result_df = loaded_forecaster.predict(future_input_df)
         save_forecast_to_csv(forecast_result_df, master_df_full, "data/forecasts/latest_forecast.csv")
@@ -287,7 +287,17 @@ def run_mlops_pipeline(
         mlflow.log_param("pipeline_end_time", datetime.now().isoformat())
         print("\nMLOps Pipeline selesai. Data untuk dashboard telah diperbarui.")
 
-def start_mlflow_server(port=5000, backend_uri="sqlite:///mlruns.db", artifact_root="./mlruns"):
+def start_mlflow_server(
+    port=5000,
+    postgres_user="mlflow_user",
+    postgres_password="mlflow_pass",
+    postgres_host="localhost",
+    postgres_port=5432,
+    postgres_db="mlflow_db",
+    artifact_root="./mlruns"
+):
+    backend_uri = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}:{postgres_port}/{postgres_db}"
+
     cmd = [
         "mlflow", "server",
         "--host", "0.0.0.0",
@@ -295,11 +305,10 @@ def start_mlflow_server(port=5000, backend_uri="sqlite:///mlruns.db", artifact_r
         "--backend-store-uri", backend_uri,
         "--default-artifact-root", artifact_root,
     ]
-    
-    # Start server as a subprocess
+
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
-    
     print(f"MLflow server started at http://0.0.0.0:{port} with PID {proc.pid}")
+    print(f"Backend URI: {backend_uri}")
     return proc
 
 if __name__ == "__main__":
