@@ -13,7 +13,7 @@ from datetime import datetime
 def parse_args():
     parser = argparse.ArgumentParser(description="Run or retrain MLOps pipeline.")
     parser.add_argument("--mode", choices=["run", "retrain"], default="run", help="Pipeline mode: run or retrain")
-    parser.add_argument("--model-uri", type=str, default="models:/ElectricityPriceForecaster/Production")
+    parser.add_argument("--model-uri", type=str, default="models:/ElectricityForecaster/Production")
     parser.add_argument("--train-data", type=str, default="processed_data/merged_data.csv")
     return parser.parse_args()
 
@@ -248,10 +248,10 @@ def run_mlops_pipeline(
         model_uri_to_register = f"runs:/{run_id}/{overall_best['artifact_path']}"
         mlflow.register_model(
             model_uri=model_uri_to_register,
-            name="ElectricityPriceForecaster",
+            name="ElectricityForecaster",
             tags={"project": "MLOps_Finland_Electricity", "source_pipeline_run": pipeline_run.info.run_id}
         )
-        print(f"Model '{overall_best['name']}' versi terbaru didaftarkan sebagai 'ElectricityPriceForecaster' di MLflow Model Registry.")
+        print(f"Model '{overall_best['name']}' versi terbaru didaftarkan sebagai 'ElectricityForecaster' di MLflow Model Registry.")
 
         # 5. Forecasting & Simpan Hasil
         print("Melakukan forecasting dan menyimpan hasil untuk dashboard...")
@@ -267,12 +267,12 @@ def run_mlops_pipeline(
         future_input_df['y'] = np.nan
 
         try:
-            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityPriceForecaster/Production")
-            print("Memuat model 'ElectricityPriceForecaster' dari MLflow Model Registry (Production Stage).")
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/Production")
+            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Production Stage).")
         except Exception as e:
             print(f"Gagal memuat model Production: {e}. Mencoba memuat versi terbaru yang terdaftar.")
-            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityPriceForecaster/latest")
-            print("Memuat model 'ElectricityPriceForecaster' dari MLflow Model Registry (Versi Terbaru).")
+            loaded_forecaster = mlflow.pyfunc.load_model("models:/ElectricityForecaster/latest")
+            print("Memuat model 'ElectricityForecaster' dari MLflow Model Registry (Versi Terbaru).")
 
         forecast_result_df = loaded_forecaster.predict(future_input_df)
         save_forecast_to_csv(forecast_result_df, master_df_full, "data/forecasts/latest_forecast.csv")
