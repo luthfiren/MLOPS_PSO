@@ -198,6 +198,10 @@ jobs:
           if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
           # pip install -r requirement.txt
           # pip install jupyter mlflow
+      
+      - name: Start MLFLow server
+        run: |
+          nohup mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlruns.db --default-artifact-root ./mlruns > mlflow.log 2>&1 &
 
       - name: Run Conditional ML Pipeline
         run: |
