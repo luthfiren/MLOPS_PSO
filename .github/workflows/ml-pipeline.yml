@@ -10,7 +10,7 @@ on:
 
 env:
   # Variabel lingkungan global yang digunakan di seluruh workflow
-  AZURE_WEBAPP_NAME: mlops-pso-alkaganteng-app # <--- GANTI INI dengan nama App Service Anda di Azure
+  AZURE_WEBAPP_NAME: pasar-listrik-fin # <--- GANTI INI dengan nama App Service Anda di Azure
   AZURE_WEBAPP_RESOURCE_GROUP: MLOPS           # <--- GANTI INI dengan nama Resource Group App Service Anda
   AZURE_CONTAINER_REGISTRY: mlopspso.azurecr.io # <--- GANTI INI dengan nama Azure Container Registry Anda
   DOCKER_IMAGE_NAME: razialvaro/mlops-pso-alkaganteng # Nama image di ACR (biasanya sama dengan nama repo)
