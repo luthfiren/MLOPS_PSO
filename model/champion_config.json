@@ -1,15 +1,6 @@
 {
-    "order": [
-        2,
-        1,
-        1
-    ],
-    "seasonal_order": [
-        1,
-        0,
-        1,
-        24
-    ],
+    "season_length": 12,
     "frequency": "h",
-    "forecast_horizon": 24
+    "forecast_horizon": 24,
+    "n_jobs": 3
 }

@@ -1,8 +1,9 @@
 # Created by pytest automatically.
 .pytest_cache/
+.gitignore
 
 # Virtual Environment
-newVenv/
+mlenv/
 mlruns/
 
 # cache
