@@ -202,7 +202,7 @@ def trigger_github_action(mode="true"):
     response = requests.post(API_URL, headers=headers, json=data)
     
     if response.status_code == 204:
-        print(f"✅ Workflow '{WORKFLOW_ID}' triggered successfully on branch '{REF_BRANCH}'.")
+        print(f"✅ Workflow '{WORKFLOW_ID}' triggered successfully on branch '{data['inputs']}'.")
     else:
         print(f"❌ Failed to trigger workflow: {response.status_code}")
         print("Response content:\n", response.text)  # <- Shows you the *actual* HTML or error body
@@ -244,36 +244,43 @@ def predict():
         importingDataFingrid = importlib.import_module("importingDataFinGrid")
         last_ingestion_time = importingDataFingrid.load_last_success_time()
         now = datetime.now(timezone.utc)
+        
+        # Log for debugging
+        print(f"now = {now}, last_ingestion_time = {last_ingestion_time}")
 
-        if (now - last_ingestion_time).total_seconds() > 1:
-            print("triggered")
-            trigger_github_action()
+        if (now - last_ingestion_time).total_seconds() <= 1:
+            return jsonify({"message": "Prediction already recent. Skipping."}), 200
 
-            forecast_path = "data/forecasts/latest_forecast.csv"
-            timeout = 1500
-            polling_interval = 60
-            elapsed = 0
+        print("✅ Triggering GitHub Action...")
+        start_trigger_time = datetime.now(timezone.utc)
+        trigger_github_action()
 
-            while elapsed < timeout:
-                now = datetime.now(timezone.utc)  # ✅ Refresh `now` in every iteration
-                if os.path.exists(forecast_path):
-                    file_mod_time = datetime.fromtimestamp(os.path.getmtime(forecast_path), tz=timezone.utc)
-                    print(f"[Polling] File mod time: {file_mod_time}, Now: {now}, Age: {(now - file_mod_time).total_seconds()}s")
-                    if (now - file_mod_time).total_seconds() <= 300:  # ✅ Only break if file is <=5 min fresh
-                        print("✅ New forecast file detected.")
-                        break
+        forecast_path = "data/forecasts/latest_forecast.csv"
+        timeout = 1500  # seconds
+        polling_interval = 60  # seconds
+        elapsed = 0
 
-                time.sleep(polling_interval)
-                elapsed += polling_interval
+        while elapsed < timeout:
+            now = datetime.now(timezone.utc)
+            if os.path.exists(forecast_path):
+                file_mod_time = datetime.fromtimestamp(os.path.getmtime(forecast_path), tz=timezone.utc)
+                print(f"[Polling] Found file: {forecast_path} | Modified: {file_mod_time} | Trigger Time: {start_trigger_time}")
 
-            else:
-                raise TimeoutError("Timeout waiting for new forecast file.")
-            
+                # Ensure file is created after the trigger
+                if file_mod_time > start_trigger_time:
+                    print("✅ New forecast file detected.")
+                    break
+
+            time.sleep(polling_interval)
+            elapsed += polling_interval
+        else:
+            raise TimeoutError("Timeout waiting for new forecast file.")
+
         return jsonify({"message": "Prediction completed successfully"}), 200
 
     except Exception as e:
+        print(f"❌ Error during prediction: {e}")
         return jsonify({"error": str(e)}), 500
-
     
 # ====================================================================================================
 # BLOK EKSEKUSI UTAMA (untuk menjalankan aplikasi Flask)
@@ -335,4 +342,4 @@ if __name__ == '__main__':
     # Gunakan PORT dari environment variable jika tersedia (digunakan oleh Azure App Service).
     # debug=True harus DIMATIKAN di produksi.
     print("Menjalankan aplikasi Flask dashboard...")
-    app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+    app.run(host='0.0.0.0', port=os.environ.get('PORT', 8000), debug=True)
