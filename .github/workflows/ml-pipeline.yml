@@ -230,7 +230,7 @@ jobs:
         # MLflow akan mencari 'mlruns/' yang dibuat oleh langkah sebelumnya
         # untuk menemukan model yang terdaftar (meskipun hanya dalam run ini).
         run: |
-          source venv/bin/activate
+          # source venv/bin/activate
           mkdir -p ./publish/artifacts/models/ # Buat direktori di paket publish
           
           # Coba unduh model versi 'Production'. Jika gagal, coba versi 'latest'.
