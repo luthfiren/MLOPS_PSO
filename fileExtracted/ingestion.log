@@ -4,3 +4,53 @@
 2025-06-04 12:52:24,730 INFO:Starting ingestion for file FMI 2025-04-05T05:34:37Z \u2192 2025-06-04T05:34:37Z
 2025-06-18 02:56:28,597 INFO:Starting ingestion for 2025-06-04T05:34:37Z \u2192 2025-06-17T19:56:28Z for extracting fingrid dataset
 2025-06-18 02:56:31,015 INFO:Ingestion complete for extracting fingrid dataset. Rows written: 48
+2025-06-18 14:15:48,813 INFO:Starting ingestion for 2025-06-16T00:00:00Z \u2192 2025-06-18T07:15:48Z for extracting fingrid dataset
+2025-06-18 14:15:50,169 INFO:Ingestion complete for extracting fingrid dataset. Rows written: 48
+2025-06-18 14:15:59,520 WARNING:Error reading JSON 'fileExtracted\lastIngestionTime.json': Expecting value: line 1 column 1 (char 0)
+2025-06-18 14:15:59,521 INFO:Starting ingestion for file FMI 2025-06-17T07:15:59.521557Z \u2192 2025-06-18T07:15:59.521557Z
+2025-06-18 14:16:18,785 INFO:Aggregated data collected from 26 stations.
+2025-06-18 14:16:18,806 INFO:Appended 24 new rows to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:16:18,886 INFO:Sorted & deduplicated data saved to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:16:18,886 INFO:CSV FMI Data complete: sorted and deduplicated.
+2025-06-18 14:16:23,877 INFO:Starting ingestion for 2025-06-18T07:15:48Z \u2192 2025-06-18T07:16:23Z for extracting fingrid dataset
+2025-06-18 14:16:24,775 WARNING:No new data to ingest in fingrid dataset
+2025-06-18 14:16:33,653 WARNING:Error reading JSON 'fileExtracted\lastIngestionTime.json': Expecting value: line 1 column 1 (char 0)
+2025-06-18 14:16:33,654 INFO:Starting ingestion for file FMI 2025-06-17T07:16:33.654788Z \u2192 2025-06-18T07:16:33.654788Z
+2025-06-18 14:16:57,193 INFO:Aggregated data collected from 26 stations.
+2025-06-18 14:16:57,218 INFO:No new data to append (all timestamps already exist).
+2025-06-18 14:16:57,270 INFO:Sorted & deduplicated data saved to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:16:57,270 INFO:CSV FMI Data complete: sorted and deduplicated.
+2025-06-18 14:17:44,647 WARNING:Error reading JSON 'fileExtracted\lastIngestionTime.json': Expecting value: line 1 column 1 (char 0)
+2025-06-18 14:17:44,647 INFO:Starting ingestion for file FMI 2025-06-17T07:17:44.647875Z \u2192 2025-06-18T07:17:44.647875Z
+2025-06-18 14:18:08,657 INFO:Aggregated data collected from 26 stations.
+2025-06-18 14:18:08,672 INFO:No new data to append (all timestamps already exist).
+2025-06-18 14:18:08,708 INFO:Sorted & deduplicated data saved to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:18:08,708 INFO:CSV FMI Data complete: sorted and deduplicated.
+2025-06-18 14:18:36,161 INFO:Starting ingestion for 2025-06-18T07:15:48Z \u2192 2025-06-18T07:18:36Z for extracting fingrid dataset
+2025-06-18 14:18:37,032 WARNING:No new data to ingest in fingrid dataset
+2025-06-18 14:18:44,338 WARNING:Error reading JSON 'fileExtracted\lastIngestionTime.json': Expecting value: line 1 column 1 (char 0)
+2025-06-18 14:18:44,339 INFO:Starting ingestion for file FMI 2025-06-17T07:18:44.339172Z \u2192 2025-06-18T07:18:44.339172Z
+2025-06-18 14:19:07,733 INFO:Aggregated data collected from 26 stations.
+2025-06-18 14:19:07,753 INFO:No new data to append (all timestamps already exist).
+2025-06-18 14:19:07,796 INFO:Sorted & deduplicated data saved to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:19:07,796 INFO:CSV FMI Data complete: sorted and deduplicated.
+2025-06-18 14:20:51,145 WARNING:Error reading JSON 'fileExtracted\lastIngestionTime.json': Expecting value: line 1 column 1 (char 0)
+2025-06-18 14:20:51,146 INFO:Starting ingestion for file FMI 2025-06-16T07:20:51.145571Z \u2192 2025-06-18T07:20:51.145571Z
+2025-06-18 14:21:15,756 INFO:Aggregated data collected from 206 stations.
+2025-06-18 14:21:15,776 INFO:Appended 24 new rows to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:21:39,496 INFO:Aggregated data collected from 26 stations.
+2025-06-18 14:21:39,513 INFO:No new data to append (all timestamps already exist).
+2025-06-18 14:21:39,566 INFO:Sorted & deduplicated data saved to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:21:39,566 INFO:CSV FMI Data complete: sorted and deduplicated.
+2025-06-18 14:22:55,683 WARNING:Error reading JSON 'fileExtracted\lastIngestionTime.json': Expecting value: line 1 column 1 (char 0)
+2025-06-18 14:22:55,684 INFO:Starting ingestion for file FMI 2025-06-16T07:22:55.684030Z \u2192 2025-06-18T07:22:55.684030Z
+2025-06-18 14:23:19,933 INFO:Aggregated data collected from 206 stations.
+2025-06-18 14:23:19,949 INFO:No new data to append (all timestamps already exist).
+2025-06-18 14:23:44,523 INFO:Aggregated data collected from 26 stations.
+2025-06-18 14:23:44,533 INFO:No new data to append (all timestamps already exist).
+2025-06-18 14:23:44,571 INFO:Sorted & deduplicated data saved to 'fileExtracted\finland_country_level_weather.csv'.
+2025-06-18 14:23:44,571 INFO:CSV FMI Data complete: sorted and deduplicated.
+2025-06-18 14:24:13,894 WARNING:Error reading JSON 'fileExtracted\lastIngestionTime.json': Expecting value: line 1 column 1 (char 0)
+2025-06-18 14:24:13,894 INFO:Starting ingestion for file FMI 2025-06-16T07:24:13.894212Z \u2192 2025-06-18T07:24:13.894212Z
+2025-06-18 14:24:38,403 INFO:Aggregated data collected from 206 stations.
+2025-06-18 14:24:38,427 INFO:No new data to append (all timestamps already exist).

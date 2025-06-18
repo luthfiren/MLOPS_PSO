@@ -1,0 +1,22 @@
+artifact_path: champion_sarimamodel
+flavors:
+  python_function:
+    artifacts:
+      model_path:
+        path: artifacts\best_model.pkl
+        uri: artifacts/models/best_model.pkl
+    cloudpickle_version: 3.1.1
+    code: null
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pyfunc.model
+    python_model: python_model.pkl
+    python_version: 3.11.9
+    streamable: false
+mlflow_version: 2.22.0
+model_size_bytes: 38139769
+model_uuid: 906f36b5f1c446a09f737b8eb0d29499
+prompts: null
+run_id: e1dde61fe4cd48989a763dc98564bbe4
+utc_time_created: '2025-06-18 00:01:51.227522'

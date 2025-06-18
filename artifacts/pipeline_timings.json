@@ -10,5 +10,9 @@
     {
         "run_date": "2025-06-10T08:10:00",
         "duration_minutes": 32
+    },
+    {
+        "run_date": "2025-06-18T14:13:18.752673",
+        "duration_minutes": 1
     }
 ]

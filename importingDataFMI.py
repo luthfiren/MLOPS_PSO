@@ -173,7 +173,7 @@ def finalize_csv(csv_filename):
 if __name__ == "__main__":
     bbox_coordinates = "19.0,59.5,31.5,70.1"
     hours_to_fetch = 24
-    total_hours_to_crawl = (24*1)
+    total_hours_to_crawl = (24*2)
     output_dir = "fileExtracted"
     os.makedirs(output_dir, exist_ok=True)
     csv_filename = os.path.join(output_dir, "finland_country_level_weather.csv")

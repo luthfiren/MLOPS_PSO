@@ -171,7 +171,7 @@ def trigger_github_action(mode="true"):
     }
 
     data = {
-        "ref": "test_pagi",  # or your deployment branch
+        "ref": "production",  # or your deployment branch
         "inputs": {
             "mode": mode
         }

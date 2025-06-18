@@ -5,13 +5,14 @@ data/*
 !data/historical_actuals.csv
 
 # Ignore all artifacts by default, except metrics and pipeline timings needed for dashboard
-artifacts/*
+!artifacts/*
 !artifacts/metrics/
 !artifacts/metrics/sarima_metrics.json
 !artifacts/pipeline_timings.json
 
 # Python cache, environment, and system files
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.pyd
@@ -30,6 +31,8 @@ eskretsec.py
 # Jupyter notebook and output
 *.ipynb
 .ipynb_checkpoints/
+newVenv/
+newVenvBat/
 
 # Model/artifacts/training outputs - ignore all except what you explicitly want above
 checkpoints/

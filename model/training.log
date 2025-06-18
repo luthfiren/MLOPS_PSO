@@ -426,3 +426,35 @@
 2025-06-17 21:36:29,967 - ThetaModel - INFO - Saved champion config to C:\file aji\semester6\pso\MLOPS_PSO\model\champion_config.json
 2025-06-17 21:36:29,967 - ThetaModel - INFO - Champion model score (1.1746744757643883) saved to C:\file aji\semester6\pso\MLOPS_PSO\model\champion_score.txt
 2025-06-17 21:36:29,967 - ThetaModel - INFO - New champion saved: {'forecast_horizon': 24, 'season_length': 12} | Score: 1.1746744757643883
+2025-06-18 14:13:23,572 - ExponentialSmoothingModel - Skipping params {'damped_trend': True, 'forecast_horizon': 24, 'seasonal_periods': 6, 'seasonal_type': 'mul', 'trend_type': None} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:23,573 - ExponentialSmoothingModel - Skipping params {'damped_trend': True, 'forecast_horizon': 24, 'seasonal_periods': 6, 'seasonal_type': 'mul', 'trend_type': 'add'} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:23,782 - ExponentialSmoothingModel - Skipping params {'damped_trend': True, 'forecast_horizon': 24, 'seasonal_periods': 12, 'seasonal_type': 'mul', 'trend_type': None} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:23,783 - ExponentialSmoothingModel - Skipping params {'damped_trend': True, 'forecast_horizon': 24, 'seasonal_periods': 12, 'seasonal_type': 'mul', 'trend_type': 'add'} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,011 - ExponentialSmoothingModel - Skipping params {'damped_trend': True, 'forecast_horizon': 24, 'seasonal_periods': 24, 'seasonal_type': 'mul', 'trend_type': None} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,012 - ExponentialSmoothingModel - Skipping params {'damped_trend': True, 'forecast_horizon': 24, 'seasonal_periods': 24, 'seasonal_type': 'mul', 'trend_type': 'add'} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,182 - ExponentialSmoothingModel - Skipping params {'damped_trend': False, 'forecast_horizon': 24, 'seasonal_periods': 6, 'seasonal_type': 'mul', 'trend_type': None} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,183 - ExponentialSmoothingModel - Skipping params {'damped_trend': False, 'forecast_horizon': 24, 'seasonal_periods': 6, 'seasonal_type': 'mul', 'trend_type': 'add'} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,340 - ExponentialSmoothingModel - Skipping params {'damped_trend': False, 'forecast_horizon': 24, 'seasonal_periods': 12, 'seasonal_type': 'mul', 'trend_type': None} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,341 - ExponentialSmoothingModel - Skipping params {'damped_trend': False, 'forecast_horizon': 24, 'seasonal_periods': 12, 'seasonal_type': 'mul', 'trend_type': 'add'} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,531 - ExponentialSmoothingModel - Skipping params {'damped_trend': False, 'forecast_horizon': 24, 'seasonal_periods': 24, 'seasonal_type': 'mul', 'trend_type': None} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,532 - ExponentialSmoothingModel - Skipping params {'damped_trend': False, 'forecast_horizon': 24, 'seasonal_periods': 24, 'seasonal_type': 'mul', 'trend_type': 'add'} due to error: endog must be strictly positive when usingmultiplicative trend or seasonal components.
+2025-06-18 14:13:24,559 - ExponentialSmoothingModel - Saved champion model with params {'has_trend': False, 'seasonal_periods': 6, 'seasonal_type': None, 'forecast_horizon': 24, 'damped_trend': True, 'trend_type': None} to C:\DataD\MATKUL\Semester_6\pso\data_aware\MLOPS_PSO\model\ExponentialSmoothingModel_champion.joblib
+2025-06-18 14:13:24,559 - ExponentialSmoothingModel - Champion model and config saved to: C:\DataD\MATKUL\Semester_6\pso\data_aware\MLOPS_PSO\model\ExponentialSmoothingModel_champion.joblib
+2025-06-18 14:13:30,100 - SarimaModel - INFO - SARIMA Params: {'order': (1, 1, 1), 'seasonal_order': (1, 1, 1, 24)} | MAE: 1.3069
+2025-06-18 14:13:33,624 - SarimaModel - INFO - SARIMA Params: {'order': (1, 1, 1), 'seasonal_order': (0, 1, 1, 24)} | MAE: 1.2739
+2025-06-18 14:13:36,683 - SarimaModel - INFO - SARIMA Params: {'order': (1, 1, 1), 'seasonal_order': (1, 0, 1, 24)} | MAE: 1.2913
+2025-06-18 14:13:48,776 - SarimaModel - INFO - SARIMA Params: {'order': (2, 1, 1), 'seasonal_order': (1, 1, 1, 24)} | MAE: 1.2403
+2025-06-18 14:13:55,074 - SarimaModel - INFO - SARIMA Params: {'order': (2, 1, 1), 'seasonal_order': (0, 1, 1, 24)} | MAE: 1.2002
+2025-06-18 14:13:58,187 - SarimaModel - INFO - SARIMA Params: {'order': (2, 1, 1), 'seasonal_order': (1, 0, 1, 24)} | MAE: 1.0954
+2025-06-18 14:14:02,646 - SarimaModel - INFO - SARIMA Params: {'order': (1, 0, 1), 'seasonal_order': (1, 1, 1, 24)} | MAE: 1.0863
+2025-06-18 14:14:06,066 - SarimaModel - INFO - SARIMA Params: {'order': (1, 0, 1), 'seasonal_order': (0, 1, 1, 24)} | MAE: 1.0447
+2025-06-18 14:14:07,842 - SarimaModel - INFO - SARIMA Params: {'order': (1, 0, 1), 'seasonal_order': (1, 0, 1, 24)} | MAE: 0.9543
+2025-06-18 14:14:07,941 - SarimaModel - INFO - Model disimpan di C:\DataD\MATKUL\Semester_6\pso\data_aware\MLOPS_PSO\model\SarimaModel_champion.joblib
+2025-06-18 14:14:07,941 - SarimaModel - INFO - SARIMA Champion: Params={'order': (1, 0, 1), 'seasonal_order': (1, 0, 1, 24)} | Score=0.9543
+2025-06-18 14:14:08,181 - ThetaModel - INFO - Theta Params: {'forecast_horizon': 24, 'season_length': 6} | MAE: 1.1763
+2025-06-18 14:14:08,390 - ThetaModel - INFO - Theta Params: {'forecast_horizon': 24, 'season_length': 12} | MAE: 1.1747
+2025-06-18 14:14:08,594 - ThetaModel - INFO - Theta Params: {'forecast_horizon': 24, 'season_length': 24} | MAE: 1.3465
+2025-06-18 14:14:08,635 - ThetaModel - INFO - Saved champion model to C:\DataD\MATKUL\Semester_6\pso\data_aware\MLOPS_PSO\model\ThetaModel_champion.joblib
+2025-06-18 14:14:08,635 - ThetaModel - INFO - Saved champion config to C:\DataD\MATKUL\Semester_6\pso\data_aware\MLOPS_PSO\model\champion_config.json
+2025-06-18 14:14:08,636 - ThetaModel - INFO - Champion model score (1.1746744757643883) saved to C:\DataD\MATKUL\Semester_6\pso\data_aware\MLOPS_PSO\model\champion_score.txt
+2025-06-18 14:14:08,636 - ThetaModel - INFO - New champion saved: {'forecast_horizon': 24, 'season_length': 12} | Score: 1.1746744757643883

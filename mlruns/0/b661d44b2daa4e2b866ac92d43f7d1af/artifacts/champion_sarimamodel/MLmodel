@@ -1,0 +1,22 @@
+artifact_path: champion_sarimamodel
+flavors:
+  python_function:
+    artifacts:
+      model_path:
+        path: artifacts\SarimaModel_champion.joblib
+        uri: C:\DataD\MATKUL\Semester_6\pso\data_aware\MLOPS_PSO\model\SarimaModel_champion.joblib
+    cloudpickle_version: 3.1.1
+    code: null
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pyfunc.model
+    python_model: python_model.pkl
+    python_version: 3.11.9
+    streamable: false
+mlflow_version: 2.22.0
+model_size_bytes: 38139753
+model_uuid: 61f1413e279c4c6fb9e964791e602173
+prompts: null
+run_id: b661d44b2daa4e2b866ac92d43f7d1af
+utc_time_created: '2025-06-17 22:27:44.627597'
