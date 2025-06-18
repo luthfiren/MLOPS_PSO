@@ -98,5 +98,3 @@ Selamat datang di proyek MLOps end-to-end ini! Proyek ini mendemonstrasikan alur
 
 1. Error: Jika Anda menemui error, pastikan semua dependensi terinstal dengan benar ```pip install -r requirements.txt```. Periksa juga log di konsol Anda untuk pesan error spesifik dari Python atau Flask
 
-2. Perubahan Kode: Setiap kali Anda melakukan perubahan pada modelling.py (untuk melatih model baru) atau app.py (untuk     mengubah tampilan dashboard), Anda perlu menghentikan server Flask (Ctrl+C) dan menjalankannya kembali ```python app.py``` untuk melihat perubahan tersebut.
-
