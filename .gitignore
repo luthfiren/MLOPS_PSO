@@ -39,8 +39,6 @@ logs/
 *.pth
 *.pkl
 *.joblib
-model/
-models/
 notebooks/
 dvc.yaml
 .dvc/
