@@ -29,12 +29,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Create .env file
-        run: |
-          echo "API_KEY=${{ secrets.API_KEY }}" >> .env
-          echo "DB_HOST=localhost" >> .env
-          echo "ANOTHER_VAR=example" >> .env
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -52,6 +46,21 @@ jobs:
         run: |
           source venv/bin/activate
           python replacement_of_preprocessingipynb.py
+
+      - name: Create eskretsec.py
+        run: |
+          source venv/bin/activate
+          
+          cat << EOF > eskretsec.py
+          import json
+          secret_json = """
+          {
+              "ipa_eky": "${{ secrets.API_KEY }}"
+          }
+          """
+          retces = json.loads(secret_json)
+          EOF
+
 
       - name: Start MLflow server
         run: |
