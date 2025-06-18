@@ -113,6 +113,9 @@ jobs:
         if: always() # Jalankan meskipun langkah sebelumnya gagal
         run: |
           docker system prune -a -f || true # Prune semua data Docker yang tidak digunakan
+      - name: Clean up MLflow run artifacts
+        run: |
+          rm -rf mlruns/ || true # Hapus direktori MLflow tracking data
 
       - name: Build Docker Image
         run: |
