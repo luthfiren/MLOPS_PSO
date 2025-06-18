@@ -47,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: |
           source venv/bin/activate
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirement.txt ]; then pip install -r requirement.txt; fi
 
       - name: Running preprocessing
         run: |
