@@ -10,14 +10,14 @@ Proyek ini merupakan bagian dari Mata Kuliah PSO dan dibuat oleh :
 Selamat datang di proyek MLOps end-to-end ini! Proyek ini mendemonstrasikan alur lengkap Machine Learning Operations (MLOps) mulai dari data ingestion, modeling, hingga deployment web menggunakan tumpukan teknologi Python dan diotomatisasi dengan GitHub Actions untuk Continuous Integration/Continuous Deployment (CI/CD). Hasil akhirnya adalah aplikasi web berbasis Python yang siap di-deploy di Azure.
 
 <h2>🗄️# RUN LOCALLY</h2>
-<h2>Getting Started</h2>
+<h3>Getting Started</h2>
 
 1. Kloning Repositori
    ```
-   git clone https://github.com/luthfiren/MLOPS_PSO.git
+   git clone https://github.com/luthfiren/MLOPS_PSO/tree/compilation_all
    ```
 
-<h2>Depedency Instalation</h2>
+<h3>Depedency Instalation</h2>
 
 1. Buat venv dalam kasus saya namanya "mlenv"
    ```
@@ -31,7 +31,7 @@ Selamat datang di proyek MLOps end-to-end ini! Proyek ini mendemonstrasikan alur
    ```
    pip install -r requirement.txt
    ```
-<h2>Data Ingetion</h2>
+<h3>Data Ingetion</h2>
 
 1. Import Data FinGrid
    Khusus untuk Data FinGrid, lakukan ini bila API dari pusat data masih tersedia (karena terbatas)
@@ -43,7 +43,7 @@ Selamat datang di proyek MLOps end-to-end ini! Proyek ini mendemonstrasikan alur
    python importingDataFMI.py
    ```
 
-<h2>Data PreProcessing</h2>
+<h3>Data PreProcessing</h2>
 
 1. Jalankan file processing data
    ```
@@ -51,7 +51,7 @@ Selamat datang di proyek MLOps end-to-end ini! Proyek ini mendemonstrasikan alur
    ```
    Pre-processing data terbilang berhasil ketika file ```merged_data.csv```, ```merged_count.json```, ```preprocessing.log``` terbentuk dalam folder ```processed_data```
 
-<h2>Run Model Locally</h2>
+<h3>Run Model Locally</h2>
 
 1. Jalankan Host mlflow
    ```
@@ -75,7 +75,7 @@ Selamat datang di proyek MLOps end-to-end ini! Proyek ini mendemonstrasikan alur
    ```
    yang menandakan bahwa seleksi model telah selesai dan anda bisa memonitor hasil train melalui ```http://localhost:5001/#/experiments/0/runs/cb7cdc9c4add4bef8b7d1554c60bc74c```. Selain itu, output dari             ```modelling.py``` selain daripada ui dari mlflow adalah sheets ```latest_forecast.csv``` yang berisi hasil forecasting dari data praprocessing.
 
-<h2>Run Web Locally</h2>
+<h3>Run Web Locally</h2>
 
 1. Jalankan server flask
    ```
