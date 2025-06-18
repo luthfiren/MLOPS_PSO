@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard MLOps Pasar Listrik Finlandia</title>
+    <title>Dashboard Prediksi MLOps untuk Pasar Listrik Finlandia</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
     <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
@@ -11,31 +11,31 @@
 </head>
 <body>
     <header>
-        <h1>Dashboard Monitoring MLOps</h1>
-        <p>Prediksi Harga Pasar Listrik Finlandia</p>
+        <h1>Dashboard Prediksi MLOps</h1>
+        <p>Studi Kasus: Pasar Listrik Finlandia</p>
     </header>
 
     <main class="dashboard-container">
-        <!-- Visualisasi 1: Prediksi vs Aktual -->
+        <!-- Visualisasi 1: Prediksi -->
         <section class="dashboard-card">
-            <h2>Prediksi Harga Listrik vs. Aktual (Historis)</h2>
-            {% if plot_forecast_vs_actual %}
-            <img src="data:image/png;base64,{{ plot_forecast_vs_actual }}" alt="Prediksi vs Aktual">
+            <h2>Prediksi Harga Listrik</h2>
+            {% if plot_forecast_only %}
+            <img src="data:image/png;base64,{{ plot_forecast_only }}" alt="Prediksi">
             {% else %}
-            <p>Data prediksi vs. aktual tidak tersedia.</p>
+            <p>Data prediksi</p>
             {% endif %}
-            <p class="card-description">Grafik ini membandingkan hasil prediksi model kami dengan data harga aktual historis yang telah tersedia. Ideal untuk backtesting performa model.</p>
+            <p class="card-description">Visual ini melihat harga biaya pasar listrik pada beberapa jam selanjutnya</p>
         </section>
 
         <!-- Visualisasi 2: Tren MAE Model -->
         <section class="dashboard-card">
-            <h2>Kinerja Model: Tren MAE Seiring Waktu</h2>
+            <h2>Tren Error MAE Setelah Model {{ model_name }} di Implementasi</h2>
             {% if plot_mae_trend %}
             <img src="data:image/png;base64,{{ plot_mae_trend }}" alt="Tren MAE">
             {% else %}
             <p>Data tren MAE model tidak tersedia.</p>
             {% endif %}
-            <p class="card-description">Melihat tren Mean Absolute Error (MAE) dari setiap pelatihan ulang model, memberikan gambaran apakah kualitas model membaik atau menurun.</p>
+            <p class="card-description">Melihat tren Mean Absolute Error (MAE) dari setiap pelatihan ulang model memberikan gambaran kualitas yang meningkat atau menurun</p>
         </section>
 
         <!-- Visualisasi 3: Waktu Penyelesaian Pipeline -->
@@ -46,15 +46,15 @@
             {% else %}
             <p>Data waktu penyelesaian pipeline tidak tersedia.</p>
             {% endif %}
-            <p class="card-description">Memantau durasi eksekusi pipeline ML kami untuk memastikan prediksi dapat dihasilkan dan ter-deploy tepat waktu setiap hari.</p>
+            <p class="card-description">Memantau durasi eksekusi setiap pipeline ML yang dijalankan untuk memastikan prediksi dapat ter-deploy tepat waktu</p>
         </section>
 
         <!-- Prediction Trigger Butto -->
         <section class="dashboard-card" style="margin-top: 40px; text-align: center; clear: both;">
-            <h2>Generate New Prediction</h2>
+            <h2>Buat prediksi baru</h2>
             <button id="predict-button" onclick="triggerPrediction()"
                     style="background-color: #007BFF; color: white; padding: 14px 28px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer;">
-                Run Prediction
+                Jalankan prediksi
             </button>
             <p id="predict-status" style="margin-top: 10px; color: #333; font-weight: 500;"></p>
         </section>
@@ -62,7 +62,7 @@
         <script>
         function triggerPrediction() {
             const statusElement = document.getElementById('predict-status');
-            statusElement.textContent = 'Processing prediction...';
+            statusElement.textContent = 'Prediksi sedang berjalan hingga 20 menit ke depan';
 
             fetch('/predict', {
                 method: 'POST',
@@ -71,10 +71,10 @@
             })
             .then(response => response.json())
             .then(data => {
-                statusElement.textContent = data.message || 'Prediction completed.';
+                statusElement.textContent = data.message || 'Prediksi selesai';
             })
             .catch(error => {
-                statusElement.textContent = 'Error during prediction: ' + error;
+                statusElement.textContent = 'Eror hasil prediksi: ' + error;
             });
         }
         </script>

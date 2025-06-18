@@ -6,13 +6,11 @@ import json
 import base64
 from io import BytesIO
 from flask import Flask, render_template, redirect, url_for, jsonify
-import importlib
 from datetime import datetime, timezone
 import requests
 import time
-from dotenv import load_dotenv
-load_dotenv()
-
+import importingDataFinGrid
+import eskretsec
 
 # --- IMpor modul-modul dari modelling.py yang relevan jika app.py juga melakukan prediksi real-time ---
 # CATATAN: Untuk dashboard monitoring, app.py biasanya HANYA MEMBACA hasil dari modelling.py.
@@ -28,56 +26,24 @@ load_dotenv()
 
 # ====================================================================================================
 # FUNGSI VISUALISASI (SEBELUMNYA DI app.py, DIULANG DI SINI)
-# ====================================================================================================
+# ====================================================================================================    
+    
 
-def plot_forecast_vs_actual(forecast_file, historical_actuals_file):
+def plot_forecast_only(forecast_file):
     """
-    Menghasilkan plot perbandingan prediksi vs aktual dari file CSV.
-    Menggunakan historical_actuals_file sebagai fallback/perbandingan.
+    Menghasilkan plot hanya untuk data prediksi dari file CSV.
     """
     try:
-        # Coba baca file forecast dari pipeline MLOps
         df_forecast = pd.read_csv(forecast_file, parse_dates=['tanggal_jam'])
         df_forecast = df_forecast.sort_values('tanggal_jam')
 
-        # Coba baca file aktual historis untuk perbandingan
-        df_actuals_hist = None
-        if os.path.exists(historical_actuals_file):
-            df_actuals_hist = pd.read_csv(historical_actuals_file, parse_dates=['tanggal_jam'])
-            df_actuals_hist = df_actuals_hist.sort_values('tanggal_jam')
-        else:
-            print(f"Warning: File historical_actuals.csv tidak ditemukan di {historical_actuals_file}. Plot Prediksi vs Aktual mungkin terbatas.")
-
-        # Gabungkan data untuk perbandingan, prioritaskan 'actual_price' dari forecast_file jika ada
-        if 'actual_price' in df_forecast.columns and not df_forecast['actual_price'].isnull().all():
-            df_merged = df_forecast[['tanggal_jam', 'predicted_price', 'actual_price']].copy()
-        elif df_actuals_hist is not None:
-            # Jika actual_price tidak ada di forecast_file, gabungkan dengan historical_actuals_file
-            df_merged = pd.merge(df_forecast[['tanggal_jam', 'predicted_price']], 
-                                 df_actuals_hist[['tanggal_jam', 'actual_price']], 
-                                 on='tanggal_jam', how='left')
-        else:
-            df_merged = df_forecast[['tanggal_jam', 'predicted_price']].copy()
-            df_merged['actual_price'] = np.nan # Tidak ada data aktual sama sekali
-
-        if df_merged.empty:
-            print("No data available for forecast vs actual plot.")
+        if 'predicted_price' not in df_forecast.columns or df_forecast.empty:
+            print("No forecast data available in the file.")
             return None
 
-        # Hitung MAE jika ada data aktual
-        mae = np.nan
-        if not df_merged['actual_price'].isnull().all():
-            valid_rows = df_merged.dropna(subset=['predicted_price', 'actual_price'])
-            if not valid_rows.empty:
-                mae = (valid_rows['predicted_price'] - valid_rows['actual_price']).abs().mean()
-
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(df_merged['tanggal_jam'], df_merged['predicted_price'], label='Harga Prediksi', color='#2ecc71') # Hijau
-        if not df_merged['actual_price'].isnull().all():
-            ax.plot(df_merged['tanggal_jam'], df_merged['actual_price'], label='Harga Aktual', color='#e74c3c', linestyle='--') # Merah
+        ax.plot(df_forecast['tanggal_jam'], df_forecast['predicted_price'], label='Harga Prediksi', color='#2ecc71')  # Hijau
 
-        title_mae = f' (MAE: {mae:.2f})' if not np.isnan(mae) else ''
-        ax.set_title(f'Prediksi vs. Aktual Harga Listrik{title_mae}', fontsize=16)
         ax.set_xlabel('Tanggal dan Jam', fontsize=12)
         ax.set_ylabel('Harga (€/MWh)', fontsize=12)
         ax.legend(fontsize=10)
@@ -93,13 +59,13 @@ def plot_forecast_vs_actual(forecast_file, historical_actuals_file):
         return img_base64
 
     except FileNotFoundError as e:
-        print(f"File data tidak ditemukan untuk plot prediksi vs aktual: {e}")
+        print(f"File forecast tidak ditemukan: {e}")
         return None
     except Exception as e:
-        print(f"Terjadi error saat membuat plot prediksi vs aktual: {e}")
+        print(f"Terjadi error saat membuat plot forecast: {e}")
         return None
 
-def plot_mae_trend(metrics_file='artifacts/metrics/sarima_metrics.json'):
+def plot_mae_trend(metrics_file='artifacts/metrics/model_metrics.json'):
     """Menghasilkan plot tren MAE dari file JSON."""
     try:
         if not os.path.exists(metrics_file):
@@ -119,10 +85,12 @@ def plot_mae_trend(metrics_file='artifacts/metrics/sarima_metrics.json'):
         df_metrics = pd.DataFrame(metrics_data)
         df_metrics['training_date'] = pd.to_datetime(df_metrics['training_date'])
         df_metrics = df_metrics.sort_values('training_date')
-
+        
+        latest_model_name = df_metrics.iloc[-1]['model_name'].replace('Model', '')
+        print(latest_model_name)
+        
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(df_metrics['training_date'], df_metrics['MAE'], marker='o', linestyle='-', color='#8e44ad') # Ungu
-        ax.set_title('Kinerja Model: Tren MAE Seiring Waktu', fontsize=16)
         ax.set_xlabel('Tanggal Pelatihan', fontsize=12)
         ax.set_ylabel('MAE', fontsize=12)
         ax.grid(True, linestyle='--', alpha=0.7)
@@ -142,27 +110,37 @@ def plot_mae_trend(metrics_file='artifacts/metrics/sarima_metrics.json'):
 def plot_pipeline_timings(timings_file='artifacts/pipeline_timings.json', daily_deadline_minutes=30):
     """Menghasilkan plot waktu penyelesaian pipeline dari file JSON."""
     try:
+        print("CWD:", os.getcwd())
+        print("Looking for timings file at:", os.path.abspath(timings_file))
         if not os.path.exists(timings_file):
             print(f"File waktu pipeline tidak ditemukan: {timings_file}")
             return None
 
         with open(timings_file, 'r') as f:
-            timings_data = json.load(f)
-        
+            content = f.read().strip()
+            if not content:
+                print("Pipeline timings file is empty.")
+                return None
+            try:
+                timings_data = json.loads(content)
+            except Exception as e:
+                print("JSON decode error:", e)
+                print("Content was:", content)
+                return None
+
         if not timings_data:
             print("No pipeline timing data found.")
             return None
 
         df_timings = pd.DataFrame(timings_data)
-        df_timings['run_date'] = pd.to_datetime(df_timings['run_date'])
+        df_timings['run_date'] = pd.to_datetime(df_timings['run_date'], format='mixed')
         df_timings = df_timings.sort_values('run_date')
 
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.bar(df_timings['run_date'], df_timings['duration_minutes'], color='#3498db') # Biru
         ax.axhline(y=daily_deadline_minutes, color='#c0392b', linestyle='--', linewidth=2, label=f'Tenggat Waktu ({daily_deadline_minutes} menit)') # Merah gelap
 
-        ax.set_title('Waktu Penyelesaian Pipeline ML', fontsize=16)
-        ax.set_xlabel('Tanggal Run', fontsize=12)
+        ax.set_xlabel('Tanggal Menjalankan Pipeline', fontsize=12)
         ax.set_ylabel('Durasi (Menit)', fontsize=12)
         ax.legend(fontsize=10)
         ax.grid(axis='y', linestyle='--', alpha=0.7)
@@ -178,9 +156,9 @@ def plot_pipeline_timings(timings_file='artifacts/pipeline_timings.json', daily_
     except Exception as e:
         print(f"Terjadi error saat membuat plot waktu pipeline: {e}")
         return None
-    
+        
 def trigger_github_action(mode="true"):
-    GITHUB_TOKEN = os.getenv("API_KEY")  # 🔐 Should be stored in environment (.env or CI/CD Secrets)
+    GITHUB_TOKEN = eskretsec.retces['ipa_eky'] # 🔐 Should be stored in environment (.env or CI/CD Secrets)
     if not GITHUB_TOKEN:
         raise ValueError("API_KEY environment variable is not set")
     REPO = "luthfiren/MLOPS_PSO"
@@ -193,21 +171,32 @@ def trigger_github_action(mode="true"):
     }
 
     data = {
-        "ref": "compilation_all",  # or your deployment branch
+        "ref": "test_pagi",  # or your deployment branch
         "inputs": {
             "mode": mode
         }
     }
-
-    response = requests.post(API_URL, headers=headers, json=data)
     
+    response = requests.post(API_URL, headers=headers, json=data)
+
     if response.status_code == 204:
-        print(f"✅ Workflow '{WORKFLOW_ID}' triggered successfully on branch '{data['inputs']}'.")
+        print(f"✅ Workflow '{WORKFLOW_ID}' triggered successfully on branch '{data['ref']}'.")
+        return True
     else:
         print(f"❌ Failed to trigger workflow: {response.status_code}")
-        print("Response content:\n", response.text)  # <- Shows you the *actual* HTML or error body
+        print("Response content:\n", response.text)
+        # Try to parse as JSON, but only if content-type is JSON and not empty
+        if response.text and 'application/json' in response.headers.get('content-type', ''):
+            try:
+                error_json = response.json()
+                print("DEBUG: GitHub error response (parsed as JSON):", error_json)
+            except Exception as e:
+                import traceback
+                print(f"❌ Error during prediction: {e}")
+                print(traceback.format_exc())
+                return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500        
         response.raise_for_status()
-                
+               
 # ====================================================================================================
 # APLIKASI FLASK
 # ====================================================================================================
@@ -216,39 +205,38 @@ app = Flask(__name__)
 
 @app.route('/')
 def dashboard():
-    # --- Path ke file data di lingkungan deployment (root aplikasi) ---
-    # File-file ini diasumsikan sudah ada dan di-deploy bersama aplikasi Flask
-    # oleh GitHub Actions setelah modelling.py dijalankan.
     forecast_file = 'data/forecasts/latest_forecast.csv'
-    # Untuk dashboard, kita mungkin perlu file actuals terpisah untuk perbandingan
-    historical_actuals_file = 'data/historical_actuals.csv' 
-    metrics_file = 'artifacts/metrics/sarima_metrics.json'
+    metrics_file = 'artifacts/metrics/model_metrics.json'
     timings_file = 'artifacts/pipeline_timings.json' 
 
     # --- Panggil fungsi visualisasi dan dapatkan gambar Base64 ---
-    plot_forecast_vs_actual_img = plot_forecast_vs_actual(forecast_file, historical_actuals_file)
+    plot_forecast_only_img = plot_forecast_only(forecast_file)
     plot_mae_trend_img = plot_mae_trend(metrics_file)
     plot_pipeline_timings_img = plot_pipeline_timings(timings_file)
-
+    with open(metrics_file, 'r') as f:
+        data = json.load(f)
+        latest_model_name = data[-1]['model_name'].replace('Model', '')  # Get the latest (last) entry
+        print(latest_model_name)
+    
     # --- Render template HTML dengan data gambar ---
     return render_template(
         'index.html',
-        plot_forecast_vs_actual=plot_forecast_vs_actual_img,
+        plot_forecast_only=plot_forecast_only_img,
         plot_mae_trend=plot_mae_trend_img,
-        plot_pipeline_timings=plot_pipeline_timings_img
+        plot_pipeline_timings=plot_pipeline_timings_img,
+        model_name=latest_model_name
     )
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    """
+    Triggers the full prediction pipeline via GitHub Actions (batch prediction).
+    Waits for fresh forecast file, returns success/failure message.
+    """
     try:
-        importingDataFingrid = importlib.import_module("importingDataFinGrid")
-        last_ingestion_time = importingDataFingrid.load_last_success_time()
+        last_ingestion_time = importingDataFinGrid.load_last_success_time()
         now = datetime.now(timezone.utc)
-        
-        # Log for debugging
-        print(f"now = {now}, last_ingestion_time = {last_ingestion_time}")
-
-        if (now - last_ingestion_time).total_seconds() <= 1:
+        if (now - last_ingestion_time).total_seconds() >= 3600 :
             return jsonify({"message": "Prediction already recent. Skipping."}), 200
 
         print("✅ Triggering GitHub Action...")
@@ -266,17 +254,14 @@ def predict():
                 file_mod_time = datetime.fromtimestamp(os.path.getmtime(forecast_path), tz=timezone.utc)
                 print(f"[Polling] Found file: {forecast_path} | Modified: {file_mod_time} | Trigger Time: {start_trigger_time}")
 
-                # Ensure file is created after the trigger
                 if file_mod_time > start_trigger_time:
                     print("✅ New forecast file detected.")
-                    break
+                    return jsonify({"message": "Prediction completed successfully"}), 200
 
             time.sleep(polling_interval)
             elapsed += polling_interval
-        else:
-            raise TimeoutError("Timeout waiting for new forecast file.")
 
-        return jsonify({"message": "Prediction completed successfully"}), 200
+        raise TimeoutError("Timeout waiting for new forecast file.")
 
     except Exception as e:
         print(f"❌ Error during prediction: {e}")
@@ -287,12 +272,6 @@ def predict():
 # ====================================================================================================
 
 if __name__ == '__main__':
-    # --- LOGIKA UNTUK PEMBUATAN FILE DUMMY (HANYA UNTUK PENGEMBANGAN LOKAL) ---
-    # Ini memastikan Anda dapat menjalankan `python app.py` secara langsung
-    # tanpa harus menjalankan seluruh pipeline ML sebelumnya, jika file belum ada.
-    # DI LINGKUNGAN PRODUKSI (AZURE APP SERVICE), FILE-FILE INI DIHARAPKAN SUDAH ADA
-    # KARENA DIHASILKAN DAN DI-DEPLOY OLEH GITHUB ACTIONS.
-
     # Buat direktori yang diperlukan jika belum ada
     os.makedirs('data/forecasts', exist_ok=True)
     os.makedirs('artifacts/metrics', exist_ok=True)
@@ -342,4 +321,4 @@ if __name__ == '__main__':
     # Gunakan PORT dari environment variable jika tersedia (digunakan oleh Azure App Service).
     # debug=True harus DIMATIKAN di produksi.
     print("Menjalankan aplikasi Flask dashboard...")
-    app.run(host='0.0.0.0', port=os.environ.get('PORT', 8000), debug=True)
+    app.run(host='0.0.0.0', port=os.environ.get('PORT', 8000))

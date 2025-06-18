@@ -20,6 +20,7 @@ __pycache__/
 venv/
 .env
 *.env
+eskretsec.py
 
 # Git and OS metadata
 .git
