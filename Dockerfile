@@ -19,19 +19,6 @@ COPY . .
 # Jalankan script data ingestion, preprocessing, dan training model SELAMA PROSES DOCKER BUILD.
 # Pastikan semua output yang dibutuhkan oleh app.py (misalnya model terlatih)
 # disimpan ke lokasi yang dapat diakses oleh app.py di dalam kontainer (misal: ./model/).
-RUN echo "Running data ingestion during Docker build..." && \
-    python importingDataFinGrid.py && \
-    python importingDataFMI.py && \
-    echo "Data ingestion complete." && \
-    \
-    echo "Running data preprocessing using preprocessing.ipynb during Docker build..." && \
-    # Pastikan jupyter dan nbconvert terinstal dari requirement.txt
-    jupyter nbconvert --to notebook --execute --inplace preprocessing.ipynb && \
-    echo "Data preprocessing complete." && \
-    \
-    echo "Running ML model training and evaluation during Docker build..." && \
-    python modelling.py && \
-    echo "ML model training and evaluation complete."
 
 # Expose the port that your application will listen on.
 EXPOSE 8000
