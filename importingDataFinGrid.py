@@ -11,7 +11,7 @@ maxRetries = 3
 # == Folder and File Setup ==
 logFolder = "fileExtracted"
 os.makedirs(logFolder, exist_ok=True)
-stateFile = os.path.join(logFolder, "lastIngestionTime.json")
+stateFile = os.path.join(logFolder, "last_ingestion_time.json")
 logPath = os.path.join(logFolder, "ingestion.log")
 savingPath = os.path.join(logFolder, "extractionDatasetFinGrid.csv")
 
