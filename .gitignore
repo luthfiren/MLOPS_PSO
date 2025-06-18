@@ -1,11 +1,47 @@
-# Created by pytest automatically.
-.pytest_cache/
+# Ignore all data by default, except the specific forecast and actuals you need
+data/*
+!data/forecasts/
+!data/forecasts/latest_forecast.csv
+!data/historical_actuals.csv
+
+# Ignore all artifacts by default, except metrics and pipeline timings needed for dashboard
+artifacts/*
+!artifacts/metrics/
+!artifacts/metrics/sarima_metrics.json
+!artifacts/pipeline_timings.json
+
+# Python cache, environment, and system files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+venv/
+.env
+*.env
+
+# Git and OS metadata
+.git
 .gitignore
+.DS_Store
 
-# Virtual Environment
-mlenv/
-mlruns/
+# Jupyter notebook and output
+*.ipynb
+.ipynb_checkpoints/
+
+# Model/artifacts/training outputs - ignore all except what you explicitly want above
+checkpoints/
+runs/
+logs/
+*.log
+*.h5
+*.pth
+*.pkl
+*.joblib
 model/
-
-# cache
-__pycache__
+models/
+notebooks/
+dvc.yaml
+.dvc/
+.dvcignore
