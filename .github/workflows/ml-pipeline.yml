@@ -132,6 +132,6 @@ jobs:
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          resource-group: ${{ env.AZURE_WEBAPP_RESOURCE_GROUP }}
+          resource-group-name: ${{ env.AZURE_WEBAPP_RESOURCE_GROUP }}
           images: |
             ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
