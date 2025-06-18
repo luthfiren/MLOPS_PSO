@@ -86,6 +86,14 @@ jobs:
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
           df -h
+          
+      - name: Azure Login (Service Principal)
+        uses: azure/login@v1
+        with:
+          # Login ke Azure menggunakan Service Principal (AZURE_CREDENTIALS)
+          # Pastikan AZURE_CREDENTIALS adalah secret GitHub Anda yang berisi JSON kredensial SP
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
       - name: Docker Login to Azure Container Registry (ACR)
         run: |
           echo "Logging in to ACR: ${{ env.AZURE_CONTAINER_REGISTRY }}..."
