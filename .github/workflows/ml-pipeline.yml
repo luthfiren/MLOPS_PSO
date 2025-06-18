@@ -108,6 +108,11 @@ jobs:
           # Perintah ini menggunakan kredensial Azure dari langkah 'Azure Login' untuk login ke ACR.
           az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY }}
           echo "Successfully logged in to ACR."
+          
+      - name: Clean Docker system post-build
+        if: always() # Jalankan meskipun langkah sebelumnya gagal
+        run: |
+          docker system prune -a -f || true # Prune semua data Docker yang tidak digunakan
 
       - name: Build Docker Image
         run: |
