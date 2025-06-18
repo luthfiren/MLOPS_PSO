@@ -8,8 +8,8 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # Copy the requirements.txt file and install dependencies.
-COPY requirement.txt .
-RUN pip install --no-cache-dir -r requirement.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # --- Perubahan di sini: Gunakan satu COPY . . untuk menyalin semua file proyek ---
 # Salin seluruh isi direktori proyek Anda ke dalam direktori /app di kontainer.
