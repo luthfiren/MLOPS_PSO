@@ -12,15 +12,14 @@ on:
           - "true"
           - "false"
   push:
-    branches: [ test_pagi ] # Keep your desired branch
+    branches: [ test_pagi ]
+
 env:
-  # Variabel lingkungan global yang digunakan di seluruh workflow
-  AZURE_WEBAPP_NAME: pasar-listrik-fin # <--- GANTI INI dengan nama App Service Anda di Azure
-  AZURE_WEBAPP_RESOURCE_GROUP: MLOPS           # <--- GANTI INI dengan nama Resource Group App Service Anda
-  AZURE_CONTAINER_REGISTRY: mlopspso.azurecr.io # <--- GANTI INI dengan nama Azure Container Registry Anda
-  DOCKER_IMAGE_NAME: razialvaro/mlops-pso-alkaganteng # Nama image di ACR (biasanya sama dengan nama repo)
-  DOCKER_IMAGE_TAG: latest # Menggunakan SHA commit sebagai tag unik untuk image Docker
-  # Anda juga bisa menambahkan tag 'latest' secara kondisional di langkah push Docker.
+  AZURE_WEBAPP_NAME: pasar-listrik-fin
+  AZURE_WEBAPP_RESOURCE_GROUP: MLOPS
+  AZURE_CONTAINER_REGISTRY: mlopspso.azurecr.io
+  DOCKER_IMAGE_NAME: razialvaro/mlops-pso-alkaganteng
+  DOCKER_IMAGE_TAG: latest
 
 jobs:
   ml-lifecycle:
@@ -75,100 +74,50 @@ jobs:
             python modelling.py --mode run
           fi
 
-      # The step to download the model from MLflow Registry is commented out
-      # as per your request for CSV deployment, but you would likely need it
-      # if your Docker image needs to serve the model directly.
-      # - name: Download Model from MLflow Registry (latest only)
-      #   run: |
-      #     source venv/bin/activate
-      #     mkdir -p ./publish/artifacts/models/
-      #     MODEL_NAME="ElectricityForecaster"
-      #     MODEL_PATH="./publish/artifacts/models/deployed_model"
-      #     python -c "
-      #     import mlflow
-      #     try:
-      #       mlflow.pyfunc.save_model(path='$MODEL_PATH', mlflow_model_uri=f'models:/$MODEL_NAME/latest')
-      #       print('Latest model downloaded successfully.')
-      #     except Exception as e:
-      #       print(f'Failed to download latest model: {e}')
-      #       exit(1)
-      #     "
-
-      # --- Docker Build and Push Steps ---
-      - name: Azure Login (Service Principal)
-        uses: azure/login@v1
-        with:
-          # Login ke Azure menggunakan Service Principal (AZURE_CREDENTIALS)
-          # Pastikan AZURE_CREDENTIALS adalah secret GitHub Anda yang berisi JSON kredensial SP
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Docker Login to Azure Container Registry (ACR)
+      # Clean up disk before Docker build
+      - name: Clean up Docker & system
         run: |
-          echo "Logging in to ACR: ${{ env.AZURE_CONTAINER_REGISTRY }}..."
-          # Perintah ini menggunakan kredensial Azure dari langkah 'Azure Login' untuk login ke ACR.
-          az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY }}
-          echo "Successfully logged in to ACR."
-          
-      - name: Clean Docker system post-build
-        if: always() # Jalankan meskipun langkah sebelumnya gagal
-        run: |
-          docker system prune -a -f || true # Prune semua data Docker yang tidak digunakan
-      - name: Clean up MLflow run artifacts
-        run: |
-          rm -rf mlruns/ || true # Hapus direktori MLflow tracking data
+          docker system prune -a -f || true
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
 
       - name: Build Docker Image
         run: |
           echo "Building Docker image: ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} ..."
-          # Membangun Docker image dari Dockerfile di root repositori ('.').
-          # Tag image dengan nama ACR, nama image, dan SHA commit.
           docker build -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} .
           echo "Docker image built successfully."
 
       - name: Push Docker Image to ACR
         run: |
-          echo "Pushing Docker image to ACR..."
-          # Mendorong image yang sudah di-tag ke ACR.
           docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
-          echo "Docker image pushed to ACR successfully."
-
-      # --- OPSIONAL: Mendorong tag 'latest' secara kondisional ---
-      - name: Push 'latest' tag to ACR (Conditional)
-        if: github.ref == 'refs/heads/webadded' # Hanya dorong 'latest' jika ini dari branch 'webadded'
-        run: |
-          echo "Tagging and pushing 'latest' image for branch 'webadded'..."
-          # Tag image yang baru saja dibuat dengan 'latest'
-          docker tag ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:latest
-          # Dorong image dengan tag 'latest' ke ACR
-          docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:latest
-          echo "'latest' tag pushed to ACR."
 
   deploy-to-webapp:
     runs-on: ubuntu-latest
-    needs: [ml-lifecycle] # Job ini akan berjalan hanya jika 'build-and-push-docker' berhasil
+    needs: [ml-lifecycle]
 
     environment:
-      name: 'Production' # Mendefinisikan lingkungan deployment (berguna untuk proteksi, URL, dll.)
-      url: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net # URL yang diharapkan dari App Service Anda
+      name: 'Production'
+      url: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net
 
     permissions:
-      id-token: write # Diperlukan jika menggunakan OIDC untuk autentikasi ke Azure
+      id-token: write
 
     steps:
       - name: Azure Login (Service Principal)
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }} # Login ulang ke Azure menggunakan SP yang sama
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy Docker Image to Azure Web App
-        uses: azure/webapps-deploy@v2 # Action untuk deployment ke Azure App Services
+        uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }} # Nama Azure Web App Anda
-          resource-group: ${{ env.AZURE_WEBAPP_RESOURCE_GROUP }} # Resource Group Azure Web App Anda
-          # Tentukan image Docker yang akan digunakan oleh App Service.
-          # Format: <ACR_URL>/<IMAGE_NAME>:<TAG>
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          resource-group: ${{ env.AZURE_WEBAPP_RESOURCE_GROUP }}
           images: |
             ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
-          # startup-command: 'gunicorn --bind 0.0.0.0 --timeout 600 app:app' # Opsional: Jika Anda perlu menentukan perintah startup kustom untuk aplikasi Anda di dalam kontainer
-          # If you used the 'latest' tag for convenience:
-          # images: '${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:latest'
